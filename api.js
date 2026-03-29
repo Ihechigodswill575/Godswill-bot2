@@ -1,6 +1,6 @@
 'use strict'
 
-const axios                      = require('axios')
+const axios = require('axios')
 const { WHAPI_TOKEN, WHAPI_URL } = require('./config')
 
 // ── Axios instance ───────────────────────────────────────────
@@ -20,7 +20,7 @@ async function request(method, endpoint, data = null) {
         const res = await client({ method, url: endpoint, data })
         return res.data
     } catch (e) {
-        console.error(`[API] ${method.toUpperCase()} ${endpoint} — ${e.response?.data?.message || e.message}`)
+        console.error(`[API] ${method.toUpperCase()} ${endpoint} — ${e.response?.status} — ${e.response?.data?.message || e.message}`)
         return null
     }
 }
@@ -98,10 +98,9 @@ async function demoteGroupParticipants(groupId, participants) {
     return request('delete', `/groups/${groupId}/admins`, { participants })
 }
 
-// ── Channel health (FIXED endpoint) ─────────────────────────
+// ── Channel health ───────────────────────────────────────────
 async function checkHealth() {
-    // Whapi uses /channel not /health
-    return request('get', '/channel')
+    return request('get', '/health')
 }
 
 // ── Webhook setup ────────────────────────────────────────────
