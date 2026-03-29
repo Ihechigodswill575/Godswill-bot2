@@ -11,6 +11,10 @@ const client = axios.create({
         'Content-Type' : 'application/json',
         Accept         : 'application/json',
     },
+    // Also pass token as query param (Whapi supports both)
+    params : {
+        token : WHAPI_TOKEN,
+    },
     timeout : 30_000,
 })
 
@@ -110,12 +114,14 @@ async function setWebhook(url) {
             {
                 url,
                 events : [
-                    { type: 'message',        method: 'post' },
-                    { type: 'message_status', method: 'post' },
+                    { type: 'messages',        method: 'post' },
+                    { type: 'message_status',  method: 'post' },
                 ],
                 mode: 'body',
             }
         ],
+        offline_mode : false,
+        full_history : false,
     })
 }
 
