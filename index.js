@@ -12,10 +12,10 @@
 const express = require('express')
 const api     = require('./api')
 const { handleMessage } = require('./handler')
-const { BOT_NAME, BOT_VERSION, OWNER_NAME } = require('./config')
+const { BOT_NAME, BOT_VERSION, OWNER_NAME, WHAPI_TOKEN, WHAPI_URL } = require('./config')
 
 const app  = express()
-const PORT = process.env.PORT || 3000
+const PORT = process.env.PORT || 8080
 
 app.use(express.json({ limit: '10mb' }))
 
@@ -32,14 +32,17 @@ app.get('/', (_, res) => {
 
 // ── Webhook — Whapi.Cloud posts here on every event ──────────
 app.post('/webhook', async (req, res) => {
-    // Always reply 200 immediately so Whapi doesn't retry
     res.sendStatus(200)
-
     try {
-        const messages = req.body?.messages
-        if (!Array.isArray(messages) || messages.length === 0) return
-        for (const msg of messages) {
-            await handleMessage(msg)
+        const body = req.body
+        if (!body) return
+
+        // Handle messages
+        const messages = body?.messages
+        if (Array.isArray(messages) && messages.length > 0) {
+            for (const msg of messages) {
+                await handleMessage(msg)
+            }
         }
     } catch (err) {
         console.error('[WEBHOOK]', err.message)
@@ -52,16 +55,32 @@ app.listen(PORT, async () => {
     console.log(`   Owner  : ${OWNER_NAME}`)
     console.log(`   Engine : TAVIK TECH`)
     console.log(`   API    : Whapi.Cloud`)
-    console.log(`   Port   : ${PORT}\n`)
+    console.log(`   Port   : ${PORT}`)
+    console.log(`   URL    : ${WHAPI_URL}`)
+    console.log(`   Token  : ${WHAPI_TOKEN ? WHAPI_TOKEN.substring(0, 8) + '...' : 'NOT SET!'}\n`)
 
-    const health = await api.checkHealth()
-    if (health) {
-        console.log(`[WHAPI] Status: ${health.status?.connection || 'unknown'}`)
-        console.log(`✅ ${BOT_NAME} is LIVE!\n`)
-    } else {
-        console.error('[WHAPI] ⚠️  Could not reach channel — check your WHAPI_TOKEN!')
+    // Try to connect to Whapi
+    let retries = 0
+    const maxRetries = 3
+
+    const tryConnect = async () => {
+        const health = await api.checkHealth()
+        if (health) {
+            console.log(`✅ ${BOT_NAME} is LIVE!`)
+            console.log(`[WHAPI] Status: ${JSON.stringify(health?.status || health)}\n`)
+        } else {
+            retries++
+            if (retries < maxRetries) {
+                console.log(`⚠️ Connection attempt ${retries}/${maxRetries} failed. Retrying in 5s...`)
+                setTimeout(tryConnect, 5000)
+            } else {
+                console.error(`❌ Could not connect to Whapi after ${maxRetries} attempts!`)
+                console.error(`   Check WHAPI_TOKEN and WHAPI_URL in Railway Variables`)
+                console.log(`\n📌 Your webhook URL:`)
+                console.log(`   https://godswill-bot2-production.up.railway.app/webhook\n`)
+            }
+        }
     }
 
-    console.log(`📌 Set your webhook URL in Whapi dashboard:`)
-    console.log(`   https://YOUR-RAILWAY-URL.up.railway.app/webhook\n`)
+    await tryConnect()
 })
