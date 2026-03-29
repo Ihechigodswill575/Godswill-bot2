@@ -1,12 +1,5 @@
 'use strict'
 
-/**
- * ============================================================
- *  TAVIK BOT — api.js
- *  Whapi.Cloud HTTP wrapper — all WhatsApp API calls go here
- * ============================================================
- */
-
 const axios                      = require('axios')
 const { WHAPI_TOKEN, WHAPI_URL } = require('./config')
 
@@ -105,22 +98,25 @@ async function demoteGroupParticipants(groupId, participants) {
     return request('delete', `/groups/${groupId}/admins`, { participants })
 }
 
-// ── Channel health ───────────────────────────────────────────
+// ── Channel health (FIXED endpoint) ─────────────────────────
 async function checkHealth() {
-    return request('get', '/health')
+    // Whapi uses /channel not /health
+    return request('get', '/channel')
 }
 
 // ── Webhook setup ────────────────────────────────────────────
 async function setWebhook(url) {
     return request('patch', '/settings', {
-        webhooks: [{
-            url,
-            events : [
-                { type: 'message',        method: 'post' },
-                { type: 'message_status', method: 'post' },
-            ],
-            mode: 'body',
-        }],
+        webhooks: [
+            {
+                url,
+                events : [
+                    { type: 'message',        method: 'post' },
+                    { type: 'message_status', method: 'post' },
+                ],
+                mode: 'body',
+            }
+        ],
     })
 }
 
