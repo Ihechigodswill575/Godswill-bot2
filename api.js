@@ -1,19 +1,19 @@
 'use strict'
 
 const axios = require('axios')
-const { WHAPI_TOKEN, WHAPI_URL } = require('./config')
+const { WHAPI_TOKEN, WHAPI_URL, OWNER_NUMBER } = require('./config')
 
-// ── Axios instance ───────────────────────────────────────────
+// Evolution API base URL and key
+const EVO_URL = process.env.EVO_URL || 'https://evolution-api-production-09bdd.up.railway.app'
+const EVO_KEY = process.env.EVO_KEY || '57695a473ad9b3f8c0f7ffee6f15dee960f35f5fc18dd903d36276150a3c17b4'
+const EVO_INSTANCE = process.env.EVO_INSTANCE || 'tavik-bot'
+
+// ── Axios instance for Evolution API ─────────────────────────
 const client = axios.create({
-    baseURL : WHAPI_URL,
+    baseURL : EVO_URL,
     headers : {
-        Authorization  : `Bearer ${WHAPI_TOKEN}`,
+        'apikey'       : EVO_KEY,
         'Content-Type' : 'application/json',
-        Accept         : 'application/json',
-    },
-    // Also pass token as query param (Whapi supports both)
-    params : {
-        token : WHAPI_TOKEN,
     },
     timeout : 30_000,
 })
@@ -29,99 +29,140 @@ async function request(method, endpoint, data = null) {
     }
 }
 
-// ── Text message ─────────────────────────────────────────────
+// ── Send Text ────────────────────────────────────────────────
 async function sendText(chatId, text, quotedId = null) {
-    const body = { to: chatId, body: text }
-    if (quotedId) body.quoted = { message_id: quotedId }
-    return request('post', '/messages/text', body)
+    const body = {
+        number  : chatId,
+        text    : text,
+    }
+    if (quotedId) body.quoted = { key: { id: quotedId } }
+    return request('post', `/message/sendText/${EVO_INSTANCE}`, body)
 }
 
-// ── Image ────────────────────────────────────────────────────
+// ── Send Image ───────────────────────────────────────────────
 async function sendImage(chatId, url, caption = '', quotedId = null) {
-    const body = { to: chatId, media: url, caption }
-    if (quotedId) body.quoted = { message_id: quotedId }
-    return request('post', '/messages/image', body)
+    const body = {
+        number  : chatId,
+        mediatype : 'image',
+        media   : url,
+        caption : caption,
+    }
+    if (quotedId) body.quoted = { key: { id: quotedId } }
+    return request('post', `/message/sendMedia/${EVO_INSTANCE}`, body)
 }
 
-// ── Video ────────────────────────────────────────────────────
+// ── Send Video ───────────────────────────────────────────────
 async function sendVideo(chatId, url, caption = '', quotedId = null) {
-    const body = { to: chatId, media: url, caption }
-    if (quotedId) body.quoted = { message_id: quotedId }
-    return request('post', '/messages/video', body)
+    const body = {
+        number    : chatId,
+        mediatype : 'video',
+        media     : url,
+        caption   : caption,
+    }
+    if (quotedId) body.quoted = { key: { id: quotedId } }
+    return request('post', `/message/sendMedia/${EVO_INSTANCE}`, body)
 }
 
-// ── Audio ────────────────────────────────────────────────────
+// ── Send Audio ───────────────────────────────────────────────
 async function sendAudio(chatId, url) {
-    return request('post', '/messages/audio', { to: chatId, media: url })
+    return request('post', `/message/sendMedia/${EVO_INSTANCE}`, {
+        number    : chatId,
+        mediatype : 'audio',
+        media     : url,
+    })
 }
 
-// ── Document ─────────────────────────────────────────────────
+// ── Send Document ────────────────────────────────────────────
 async function sendDocument(chatId, url, filename = 'file') {
-    return request('post', '/messages/document', { to: chatId, media: url, filename })
+    return request('post', `/message/sendMedia/${EVO_INSTANCE}`, {
+        number    : chatId,
+        mediatype : 'document',
+        media     : url,
+        fileName  : filename,
+    })
 }
 
-// ── Reaction ─────────────────────────────────────────────────
+// ── Send Reaction ────────────────────────────────────────────
 async function sendReaction(chatId, messageId, emoji) {
-    return request('post', '/messages/reaction', { to: chatId, message_id: messageId, emoji })
+    return request('post', `/message/sendReaction/${EVO_INSTANCE}`, {
+        key     : { remoteJid: chatId, id: messageId },
+        reaction: emoji,
+    })
 }
 
-// ── Delete message ───────────────────────────────────────────
+// ── Delete Message ───────────────────────────────────────────
 async function deleteMessage(chatId, messageId) {
-    return request('delete', `/messages/${messageId}`, { chat_id: chatId })
+    return request('delete', `/chat/deleteMessage/${EVO_INSTANCE}`, {
+        id         : messageId,
+        remoteJid  : chatId,
+        fromMe     : false,
+    })
 }
 
-// ── Mark read ────────────────────────────────────────────────
+// ── Mark Read ────────────────────────────────────────────────
 async function markRead(chatId) {
-    return request('patch', `/chats/${chatId}`, { read: true })
+    return request('post', `/chat/markMessageAsRead/${EVO_INSTANCE}`, {
+        readMessages: [{ remoteJid: chatId, fromMe: false, id: 'all' }]
+    })
 }
 
-// ── Typing indicator ─────────────────────────────────────────
+// ── Send Typing ──────────────────────────────────────────────
 async function sendTyping(chatId, seconds = 2) {
-    return request('post', '/chats/typing', { chat_id: chatId, seconds })
+    await request('post', `/chat/sendPresence/${EVO_INSTANCE}`, {
+        number   : chatId,
+        options  : { presence: 'composing', delay: seconds * 1000 }
+    })
 }
 
-// ── Group info ───────────────────────────────────────────────
+// ── Get Group Info ───────────────────────────────────────────
 async function getGroupInfo(groupId) {
-    return request('get', `/groups/${groupId}`)
+    return request('get', `/group/findGroupInfos/${EVO_INSTANCE}?groupJid=${groupId}`)
 }
 
-// ── Group participants ───────────────────────────────────────
+// ── Group Participants ───────────────────────────────────────
 async function addGroupParticipants(groupId, participants) {
-    return request('post', `/groups/${groupId}/participants`, { participants })
+    return request('post', `/group/updateParticipant/${EVO_INSTANCE}`, {
+        groupJid     : groupId,
+        action       : 'add',
+        participants : participants,
+    })
 }
 
 async function removeGroupParticipants(groupId, participants) {
-    return request('delete', `/groups/${groupId}/participants`, { participants })
+    return request('post', `/group/updateParticipant/${EVO_INSTANCE}`, {
+        groupJid     : groupId,
+        action       : 'remove',
+        participants : participants,
+    })
 }
 
 async function promoteGroupParticipants(groupId, participants) {
-    return request('patch', `/groups/${groupId}/admins`, { participants })
+    return request('post', `/group/updateParticipant/${EVO_INSTANCE}`, {
+        groupJid     : groupId,
+        action       : 'promote',
+        participants : participants,
+    })
 }
 
 async function demoteGroupParticipants(groupId, participants) {
-    return request('delete', `/groups/${groupId}/admins`, { participants })
+    return request('post', `/group/updateParticipant/${EVO_INSTANCE}`, {
+        groupJid     : groupId,
+        action       : 'demote',
+        participants : participants,
+    })
 }
 
-// ── Channel health ───────────────────────────────────────────
+// ── Health Check ─────────────────────────────────────────────
 async function checkHealth() {
-    return request('get', '/health')
+    return request('get', `/instance/connectionState/${EVO_INSTANCE}`)
 }
 
-// ── Webhook setup ────────────────────────────────────────────
+// ── Set Webhook ──────────────────────────────────────────────
 async function setWebhook(url) {
-    return request('patch', '/settings', {
-        webhooks: [
-            {
-                url,
-                events : [
-                    { type: 'messages',        method: 'post' },
-                    { type: 'message_status',  method: 'post' },
-                ],
-                mode: 'body',
-            }
-        ],
-        offline_mode : false,
-        full_history : false,
+    return request('post', `/webhook/set/${EVO_INSTANCE}`, {
+        url     : url,
+        enabled : true,
+        events  : ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'SEND_MESSAGE']
     })
 }
 
