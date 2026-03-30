@@ -9,58 +9,57 @@ async function handleMessage(msg) {
     try {
         if (!msg) return
 
-        // ── Debug log ────────────────────────────────────────
-        console.log('[MSG RAW]', JSON.stringify(msg).substring(0, 500))
+        // ── Evolution API message structure ──────────────────
+        // msg.key.remoteJid = chat ID
+        // msg.key.fromMe = true/false
+        // msg.key.participant = sender in groups
+        // msg.message = message content
+        // msg.pushName = sender name
 
-        // ── Ignore outgoing & status messages ────────────────
+        // Ignore outgoing messages
         if (msg.key?.fromMe === true) return
-        if (msg.messageType === 'protocolMessage') return
-        if (msg.messageType === 'senderKeyDistributionMessage') return
 
-        // ── Extract text from Evolution API format ───────────
+        // Ignore non-message events
+        const msgContent = msg.message
+        if (!msgContent) return
+
+        // Ignore protocol messages
+        if (msgContent.protocolMessage) return
+        if (msgContent.senderKeyDistributionMessage) return
+        if (msgContent.reactionMessage) return
+
+        // ── Extract text ─────────────────────────────────────
         const text = (
-            msg.message?.conversation ||
-            msg.message?.extendedTextMessage?.text ||
-            msg.message?.imageMessage?.caption ||
-            msg.message?.videoMessage?.caption ||
-            msg.body ||
-            msg.text?.body ||
-            msg.caption ||
+            msgContent.conversation ||
+            msgContent.extendedTextMessage?.text ||
+            msgContent.imageMessage?.caption ||
+            msgContent.videoMessage?.caption ||
+            msgContent.documentMessage?.caption ||
             ''
         ).trim()
 
-        // ── Extract chat ID ──────────────────────────────────
-        const chatId = (
-            msg.key?.remoteJid ||
-            msg.chat_id ||
-            msg.from ||
-            ''
-        )
+        // ── Extract IDs ──────────────────────────────────────
+        const chatId = msg.key.remoteJid
+        if (!chatId) return
 
-        if (!chatId) {
-            console.log('[HANDLER] No chatId found')
-            return
-        }
+        const isGroup = chatId.endsWith('@g.us')
 
-        // ── Extract sender ───────────────────────────────────
-        const sender = (
-            msg.key?.participant?.replace('@s.whatsapp.net', '') ||
-            msg.sender?.phone ||
-            msg.pushName ||
-            chatId.replace('@s.whatsapp.net', '').replace('@g.us', '') ||
-            ''
-        )
+        // In groups sender is in participant, in DMs it's remoteJid
+        const senderJid = isGroup
+            ? (msg.key.participant || '')
+            : chatId
 
-        // Clean sender number
-        const senderNumber = sender.replace(/[^0-9]/g, '')
+        const senderNumber = senderJid
+            .replace('@s.whatsapp.net', '')
+            .replace(/[^0-9]/g, '')
 
-        const isGroup      = chatId.endsWith('@g.us')
-        const isOwner      = senderNumber === OWNER_NUMBER || 
-                             senderNumber === OWNER_NUMBER.replace(/\D/g, '')
+        if (!senderNumber) return
+
+        const isOwner      = senderNumber === OWNER_NUMBER
         const isSudo       = state.sudoUsers.includes(senderNumber)
         const isPrivileged = isOwner || isSudo
 
-        console.log(`[MSG] From: ${senderNumber} | Chat: ${chatId} | Text: ${text}`)
+        console.log(`[MSG] ${senderNumber} → "${text}" | Group: ${isGroup}`)
 
         // ── Auto read ────────────────────────────────────────
         if (state.autoread) {
@@ -70,10 +69,11 @@ async function handleMessage(msg) {
         // ── Auto react ───────────────────────────────────────
         if (state.autoreact && text) {
             const emojis = ['❤️', '😂', '🔥', '⚡', '👍', '🎉']
-            const msgId = msg.key?.id || msg.id
-            if (msgId) {
-                await api.sendReaction(chatId, msgId, emojis[Math.floor(Math.random() * emojis.length)]).catch(() => {})
-            }
+            await api.sendReaction(
+                chatId,
+                msg.key.id,
+                emojis[Math.floor(Math.random() * emojis.length)]
+            ).catch(() => {})
         }
 
         // ── Auto typing ──────────────────────────────────────
@@ -84,8 +84,7 @@ async function handleMessage(msg) {
         // ── Anti link ────────────────────────────────────────
         if (isGroup && state.antilink[chatId] && !isPrivileged) {
             if (/(https?:\/\/|wa\.me|chat\.whatsapp\.com)/i.test(text)) {
-                const msgId = msg.key?.id || msg.id
-                await api.deleteMessage(chatId, msgId).catch(() => {})
+                await api.deleteMessage(chatId, msg.key.id).catch(() => {})
                 await api.sendText(chatId, `⚠️ @${senderNumber} Links are not allowed!`)
                 return
             }
@@ -109,8 +108,7 @@ async function handleMessage(msg) {
         // ── Anti bad word ────────────────────────────────────
         if (isGroup && state.antibadword[chatId] && !isPrivileged) {
             if (BAD_WORDS.some(w => text.toLowerCase().includes(w))) {
-                const msgId = msg.key?.id || msg.id
-                await api.deleteMessage(chatId, msgId).catch(() => {})
+                await api.deleteMessage(chatId, msg.key.id).catch(() => {})
                 await api.sendText(chatId, `⚠️ @${senderNumber} Watch your language!`)
                 return
             }
@@ -124,7 +122,7 @@ async function handleMessage(msg) {
             return
         }
 
-        // ── Route to commands ────────────────────────────────
+        // ── Route to commands ─────────────────────────────────
         if (!text || !text.startsWith(PREFIX)) return
 
         console.log(`[CMD] ${senderNumber} → ${text}`)
