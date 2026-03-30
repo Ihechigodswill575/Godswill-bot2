@@ -2,48 +2,50 @@
 
 const express = require('express')
 const { handleMessage } = require('./handler')
-const { BOT_NAME, BOT_VERSION, OWNER_NAME, EVO_URL, EVO_INSTANCE } = require('./config')
+const { BOT_NAME, BOT_VERSION, OWNER_NAME, EVO_INSTANCE } = require('./config')
 
 const app  = express()
 const PORT = process.env.PORT || 8080
 
 app.use(express.json({ limit: '50mb' }))
 
-// ── Health check ─────────────────────────────────────────────
+// ── Health check ──────────────────────────────────────────────
 app.get('/', (_, res) => {
     res.json({
-        bot    : `${BOT_NAME} ${BOT_VERSION}`,
-        owner  : OWNER_NAME,
-        engine : 'TAVIK TECH',
-        api    : 'Evolution API',
-        status : 'Running ✅',
+        bot      : `${BOT_NAME} ${BOT_VERSION}`,
+        owner    : OWNER_NAME,
+        engine   : 'TAVIK TECH',
+        api      : 'Evolution API',
+        instance : EVO_INSTANCE,
+        status   : '✅ Running',
     })
 })
 
 // ── Webhook ───────────────────────────────────────────────────
 app.post('/webhook', async (req, res) => {
+    // Always respond 200 immediately
     res.sendStatus(200)
+
     try {
         const body = req.body
         if (!body) return
 
         const event = body.event || ''
-        console.log(`[WEBHOOK] Event: ${event}`)
 
-        // Only handle messages.upsert
-        if (event === 'messages.upsert' || event === 'MESSAGES_UPSERT') {
-            const data = body.data
-            if (!data) return
+        // Only process message events
+        if (event !== 'messages.upsert' && event !== 'MESSAGES_UPSERT') return
 
-            // Evolution API wraps single message in data object
-            if (data.key) {
-                await handleMessage(data)
-            }
-            // Or array of messages
-            else if (Array.isArray(data)) {
-                for (const msg of data) {
-                    if (msg?.key) await handleMessage(msg)
-                }
+        const data = body.data
+        if (!data) return
+
+        // Single message
+        if (data.key) {
+            await handleMessage(data)
+        }
+        // Array of messages
+        else if (Array.isArray(data)) {
+            for (const msg of data) {
+                if (msg?.key) await handleMessage(msg)
             }
         }
 
@@ -52,12 +54,13 @@ app.post('/webhook', async (req, res) => {
     }
 })
 
-// ── Boot ─────────────────────────────────────────────────────
+// ── Boot ──────────────────────────────────────────────────────
 app.listen(PORT, () => {
-    console.log(`\n🚀 ${BOT_NAME} ${BOT_VERSION} started!`)
-    console.log(`   Owner    : ${OWNER_NAME}`)
-    console.log(`   API      : Evolution API`)
-    console.log(`   Instance : ${EVO_INSTANCE}`)
-    console.log(`   Port     : ${PORT}\n`)
-    console.log(`✅ ${BOT_NAME} is LIVE and ready!\n`)
+    console.log(`\n╔════════════════════════════╗`)
+    console.log(`║   🤖 ${BOT_NAME} ${BOT_VERSION}        ║`)
+    console.log(`║   👑 ${OWNER_NAME}     ║`)
+    console.log(`║   ⚡ TAVIK TECH             ║`)
+    console.log(`╚════════════════════════════╝`)
+    console.log(`\n✅ Bot is LIVE on port ${PORT}!`)
+    console.log(`📌 Instance: ${EVO_INSTANCE}\n`)
 })
