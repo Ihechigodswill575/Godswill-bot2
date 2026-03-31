@@ -3,7 +3,6 @@
 const api       = require('./api')
 const state     = require('./state')
 const utils     = require('./utils')
-const cdn       = require('./cdn')
 const reactions = require('./reactions')
 const { BOT_NAME, BOT_VERSION, OWNER_NAME, OWNER_NUMBER, OWNER_NUMBERS, PREFIX } = require('./config')
 
@@ -16,108 +15,128 @@ const FLOOD_PAYLOADS = [
     () => '\u202E' + 'TAVIK'.repeat(1000) + '\u202C'.repeat(1000),
 ]
 
+const GIF_ACTIONS = {
+    hug: 'hug', pat: 'pat', slap: 'slap', kiss: 'kiss',
+    cry: 'cry', dance: 'dance', wave: 'wave', wink: 'wink',
+    bite: 'bite', blush: 'blush', cuddle: 'cuddle', poke: 'poke',
+    yeet: 'yeet', bonk: 'bonk', lick: 'lick', highfive: 'highfive',
+}
+
 const pick   = arr => arr[Math.floor(Math.random() * arr.length)]
 const sleep  = ms  => new Promise(r => setTimeout(r, ms))
 const digits = str => str?.replace(/[^0-9]/g, '') || ''
 
-async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup) {
+// Extract number from @mention or plain number
+function extractTarget(arg = '', quotedParticipant = '') {
+    if (!arg && !quotedParticipant) return null
+    // From quoted/replied message
+    if (!arg && quotedParticipant) {
+        return quotedParticipant.replace(/@s\.whatsapp\.net/g, '').replace(/[^0-9]/g, '')
+    }
+    // From @mention like @2348012345678
+    if (arg.startsWith('@')) return arg.replace('@', '').replace(/[^0-9]/g, '')
+    // Plain number
+    return arg.replace(/[^0-9]/g, '') || null
+}
+
+async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup, msg) {
     const isPrivileged = isOwner || isSudo
     const args  = text.trim().split(/\s+/)
     const cmd   = args[0].toLowerCase()
     const query = args.slice(1).join(' ')
 
-    // ── .menu / .help ────────────────────────────────────────
+    // Get quoted message participant (for reply-based commands)
+    const quotedParticipant = msg?.message?.extendedTextMessage?.contextInfo?.participant || ''
+
+    // ── .menu ────────────────────────────────────────────────
     if (cmd === `${PREFIX}menu` || cmd === `${PREFIX}help`) {
         await api.sendTyping(chatId, 1)
         return api.sendText(chatId,
-`━━━━━( ${BOT_NAME} ${BOT_VERSION} )━━━━━
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━╮
-│ ⏳ Uptime  : ${utils.getUptime()}
-│ 🔐 Mode    : ${state.selfMode ? 'Self 🔒' : 'Public 🔓'}
-│ ✍️ Owner   : ${OWNER_NAME}
-╰──────────────────────────╯
+`╔══════════════════════════════╗
+║   🤖 *${BOT_NAME} ${BOT_VERSION}*          ║
+║   👑 ${OWNER_NAME}           ║
+║   ⚡ TAVIK TECH               ║
+╚══════════════════════════════╝
 
-┌─〔 General 〕
-│ .menu .alive .ping
-│ .info .credits .owner
-└──────────────────────────
+📊 *STATUS*
+┣ ⏳ Uptime : ${utils.getUptime()}
+┣ 🔐 Mode   : ${state.selfMode ? 'Self 🔒' : 'Public 🔓'}
+┗ 🟢 Online
 
-┌─〔 AI & Tools 〕
-│ .ai <question>
-│ .wiki <topic>
-│ .weather <city>
-│ .calc <math>
-│ .time .pint <search>
-└──────────────────────────
+─────────────────────────────
+🌐 *GENERAL*
+┣ ${PREFIX}alive  ${PREFIX}ping  ${PREFIX}info
+┗ ${PREFIX}credits  ${PREFIX}owner
 
-┌─〔 Media 〕
-│ .tiktok <url>
-│ .meme .upscale
-└──────────────────────────
+─────────────────────────────
+🤖 *AI & TOOLS*
+┣ ${PREFIX}ai <question>
+┣ ${PREFIX}wiki <topic>
+┣ ${PREFIX}weather <city>
+┣ ${PREFIX}calc <math>
+┗ ${PREFIX}time  ${PREFIX}pint <search>
 
-┌─〔 Fun & Games 〕
-│ .dice .coin .8ball
-│ .truth .dare .joke
-│ .funfact .roast
-│ .compliment .quote
-│ .advice
-└──────────────────────────
+─────────────────────────────
+🎬 *MEDIA*
+┣ ${PREFIX}tiktok <url>
+┗ ${PREFIX}meme  ${PREFIX}upscale
 
-┌─〔 Reactions 〕
-│ .cry .hug .slap .pat
-│ .wink .dance .bonk .bite
-│ .cuddle .blush .wave
-│ .lick .poke .highfive
-│ .love .cool .yeet .kill
-└──────────────────────────
+─────────────────────────────
+🎮 *FUN & GAMES*
+┣ ${PREFIX}dice  ${PREFIX}coin  ${PREFIX}8ball
+┣ ${PREFIX}truth  ${PREFIX}dare
+┣ ${PREFIX}joke  ${PREFIX}funfact
+┗ ${PREFIX}roast  ${PREFIX}compliment  ${PREFIX}quote  ${PREFIX}advice
 
-┌─〔 Group (Admin) 〕
-│ .tagall .hidetag
-│ .kick .add .promote
-│ .demote .mute .unmute
-│ .gcinfo .kickall
-│ .listadmins .grouplink
-│ .setgcname .resetlink
-└──────────────────────────
+─────────────────────────────
+💞 *REACTIONS* _(sends GIF)_
+┣ ${PREFIX}hug  ${PREFIX}pat  ${PREFIX}slap  ${PREFIX}kiss
+┣ ${PREFIX}cry  ${PREFIX}dance  ${PREFIX}wave  ${PREFIX}wink
+┣ ${PREFIX}bite  ${PREFIX}blush  ${PREFIX}cuddle
+┗ ${PREFIX}poke  ${PREFIX}yeet  ${PREFIX}bonk  ${PREFIX}lick  ${PREFIX}highfive
 
-┌─〔 Settings (Admin) 〕
-│ .antilink on/off
-│ .antispam on/off
-│ .antibadword on/off
-│ .antidelete on/off
-│ .autoreply on/off
-│ .autoread on/off
-│ .autoreact on/off
-│ .autotyping on/off
-└──────────────────────────
+─────────────────────────────
+👥 *GROUP* _(admin only)_
+┣ ${PREFIX}tagall  ${PREFIX}hidetag
+┣ ${PREFIX}kick  ${PREFIX}add  ${PREFIX}promote  ${PREFIX}demote
+┣ ${PREFIX}mute  ${PREFIX}unmute  ${PREFIX}gcinfo
+┗ ${PREFIX}kickall  ${PREFIX}listadmins  ${PREFIX}grouplink  ${PREFIX}setgcname  ${PREFIX}resetlink
 
-┌─〔 Owner Only 〕
-│ .self .public
-│ .addsudo .delsudo
-│ .sudolist .sudo
-│ .buguser .buggc
-│ .stopflood .hijack
-│ .banuser
-└──────────────────────────
+─────────────────────────────
+⚙️ *SETTINGS* _(privileged)_
+┣ ${PREFIX}antilink on/off
+┣ ${PREFIX}antispam on/off
+┣ ${PREFIX}antibadword on/off
+┣ ${PREFIX}antidelete on/off
+┣ ${PREFIX}autoreply on/off
+┣ ${PREFIX}chatbot on/off
+┗ ${PREFIX}autoread  ${PREFIX}autoreact  ${PREFIX}autotyping on/off
 
-╔══════════════════════════╗
-║  🤖 ${BOT_NAME} ${BOT_VERSION}          ║
-║  👑 ${OWNER_NAME}         ║
-║  ⚡ Powered by TAVIK TECH ║
-╚══════════════════════════╝`, qid)
+─────────────────────────────
+👑 *OWNER ONLY*
+┣ ${PREFIX}self  ${PREFIX}public
+┣ ${PREFIX}addsudo <number/@mention>
+┣ ${PREFIX}delsudo <number/@mention>
+┣ ${PREFIX}sudolist  ${PREFIX}sudo
+┣ ${PREFIX}buguser  ${PREFIX}buggc  ${PREFIX}stopflood
+┗ ${PREFIX}hijack  ${PREFIX}banuser
+
+─────────────────────────────
+_⚡ Powered by TAVIK TECH_
+_Say *tavik* anytime to wake me up!_`, qid)
     }
 
     // ── .alive ───────────────────────────────────────────────
     if (cmd === `${PREFIX}alive`) {
         return api.sendText(chatId,
-            `╔══════════════════╗\n` +
-            `║  ✅ BOT IS ALIVE! ║\n` +
-            `╚══════════════════╝\n\n` +
+            `╔══════════════════════╗\n` +
+            `║   ✅ *BOT IS ALIVE!*  ║\n` +
+            `╚══════════════════════╝\n\n` +
             `🤖 *${BOT_NAME} ${BOT_VERSION}*\n` +
             `⏳ Uptime : ${utils.getUptime()}\n` +
             `👑 Owner  : ${OWNER_NAME}\n` +
             `🔐 Mode   : ${state.selfMode ? 'Self 🔒' : 'Public 🔓'}\n` +
-            `⚡ Status : Online 🟢`, qid)
+            `🟢 Status : Online`, qid)
     }
 
     // ── .ping ────────────────────────────────────────────────
@@ -130,19 +149,20 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
     if (cmd === `${PREFIX}info`) {
         return api.sendText(chatId,
             `🤖 *${BOT_NAME} ${BOT_VERSION}*\n` +
+            `━━━━━━━━━━━━━━━━━━━━\n` +
             `👑 Owner   : ${OWNER_NAME}\n` +
             `⚡ Engine  : TAVIK TECH\n` +
             `🔧 API     : Evolution API\n` +
             `🔐 Mode    : ${state.selfMode ? 'Self 🔒' : 'Public 🔓'}\n` +
-            `⏳ Uptime  : ${utils.getUptime()}`, qid)
+            `⏳ Uptime  : ${utils.getUptime()}\n` +
+            `🌍 Host    : Railway`, qid)
     }
 
     // ── .credits ─────────────────────────────────────────────
     if (cmd === `${PREFIX}credits`) {
         return api.sendText(chatId,
-            `╔══════════════════════╗\n` +
-            `║  🏆 TAVIK BOT CREDITS ║\n` +
-            `╚══════════════════════╝\n\n` +
+            `🏆 *TAVIK BOT CREDITS*\n` +
+            `━━━━━━━━━━━━━━━━━━━━\n` +
             `👑 Developer : GODSWILL (TAVIK)\n` +
             `🤖 Bot       : ${BOT_NAME} ${BOT_VERSION}\n` +
             `⚡ Engine    : Node.js + Evolution API\n` +
@@ -153,7 +173,8 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
     // ── .owner ───────────────────────────────────────────────
     if (cmd === `${PREFIX}owner`) {
         return api.sendText(chatId,
-            `👑 *BOT OWNER*\n\n` +
+            `👑 *BOT OWNER*\n` +
+            `━━━━━━━━━━━━━━━━━━━━\n` +
             `📛 Name   : ${OWNER_NAME}\n` +
             `📱 Number : wa.me/${OWNER_NUMBER}\n` +
             `⚡ Brand  : TAVIK TECH\n` +
@@ -166,7 +187,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
         await api.sendTyping(chatId, 3)
         const reply = await utils.askAI(query)
         return api.sendText(chatId,
-            `🤖 *TAVIK AI*\n\n${reply}\n\n━━━━━━━━━━━━\n⚡ ${BOT_NAME}`, qid)
+            `🤖 *TAVIK AI*\n━━━━━━━━━━━━\n\n${reply}\n\n━━━━━━━━━━━━\n⚡ ${BOT_NAME}`, qid)
     }
 
     // ── .wiki ─────────────────────────────────────────────────
@@ -176,7 +197,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
         const result = await utils.getWiki(query)
         if (!result) return api.sendText(chatId, '❌ Nothing found on Wikipedia!', qid)
         return api.sendText(chatId,
-            `📖 *Wikipedia: ${query}*\n\n${result.slice(0, 800)}...\n\n⚡ ${BOT_NAME}`, qid)
+            `📖 *Wikipedia: ${query}*\n━━━━━━━━━━━━\n\n${result.slice(0, 800)}...\n\n⚡ ${BOT_NAME}`, qid)
     }
 
     // ── .weather ─────────────────────────────────────────────
@@ -184,7 +205,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
         if (!query) return api.sendText(chatId, `❌ Usage: ${PREFIX}weather <city>`, qid)
         await api.sendTyping(chatId, 2)
         const result = await utils.getWeather(query)
-        if (!result) return api.sendText(chatId, '❌ City not found or weather unavailable!', qid)
+        if (!result) return api.sendText(chatId, '❌ City not found!', qid)
         return api.sendText(chatId, `🌤️ *Weather: ${query}*\n\n${result}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
@@ -198,9 +219,9 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             const result = Function(`"use strict"; return (${safe})`)()
             if (!isFinite(result)) return api.sendText(chatId, '❌ Result is undefined!', qid)
             return api.sendText(chatId,
-                `🧮 *Calculator*\n\n📝 ${query}\n✅ = ${result}\n\n⚡ ${BOT_NAME}`, qid)
+                `🧮 *Calculator*\n\n📝 ${query}\n✅ = *${result}*\n\n⚡ ${BOT_NAME}`, qid)
         } catch {
-            return api.sendText(chatId, '❌ Invalid calculation! Check your expression.', qid)
+            return api.sendText(chatId, '❌ Invalid expression! Example: .calc 5+3*2', qid)
         }
     }
 
@@ -208,7 +229,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
     if (cmd === `${PREFIX}time`) {
         const now = new Date()
         return api.sendText(chatId,
-            `🕐 *Current Time*\n\n` +
+            `🕐 *Current Time*\n━━━━━━━━━━━━\n` +
             `📅 ${now.toDateString()}\n` +
             `⏰ ${now.toTimeString().split(' ')[0]}\n` +
             `🌍 UTC: ${now.toUTCString()}\n\n⚡ ${BOT_NAME}`, qid)
@@ -218,9 +239,13 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
     if (cmd === `${PREFIX}pint`) {
         if (!query) return api.sendText(chatId, `❌ Usage: ${PREFIX}pint <search query>`, qid)
         await api.sendTyping(chatId, 2)
-        const url = await utils.searchImage(query)
-        if (!url) return api.sendText(chatId, '❌ No image found!', qid)
-        return api.sendImage(chatId, url, `🖼️ *${query}*\n⚡ ${BOT_NAME}`, qid)
+        try {
+            const url = await utils.searchImage(query)
+            if (!url) return api.sendText(chatId, '❌ No image found!', qid)
+            return api.sendImage(chatId, url, `🖼️ *${query}*\n⚡ ${BOT_NAME}`, qid)
+        } catch {
+            return api.sendText(chatId, '❌ Image search failed. Try again!', qid)
+        }
     }
 
     // ── .tiktok ──────────────────────────────────────────────
@@ -236,27 +261,28 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
     if (cmd === `${PREFIX}meme`) {
         await api.sendTyping(chatId, 1)
         const url = await utils.getMeme()
-        if (!url) return api.sendText(chatId, '❌ Could not fetch a meme right now. Try again!', qid)
+        if (!url) return api.sendText(chatId, '❌ Could not fetch a meme. Try again!', qid)
         return api.sendImage(chatId, url, `😂 *Random Meme!*\n⚡ ${BOT_NAME}`, qid)
     }
 
     // ── .upscale ─────────────────────────────────────────────
     if (cmd === `${PREFIX}upscale`) {
         return api.sendText(chatId,
-            `🔍 *Image Upscale*\n\n` +
-            `Reply to an image with *.upscale* to upscale it.\n\n⚡ ${BOT_NAME}`, qid)
+            `🔍 *Image Upscale*\n\nReply to an image with *.upscale* to upscale it.\n\n⚡ ${BOT_NAME}`, qid)
     }
 
     // ── .dice ────────────────────────────────────────────────
     if (cmd === `${PREFIX}dice`) {
+        const roll  = Math.floor(Math.random() * 6) + 1
+        const faces = ['', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣']
         return api.sendText(chatId,
-            `🎲 You rolled: *${Math.floor(Math.random() * 6) + 1}*\n⚡ ${BOT_NAME}`, qid)
+            `🎲 *Dice Roll!*\n\n${faces[roll]} You rolled a *${roll}*!\n\n⚡ ${BOT_NAME}`, qid)
     }
 
     // ── .coin ────────────────────────────────────────────────
     if (cmd === `${PREFIX}coin`) {
-        return api.sendText(chatId,
-            `🪙 *${Math.random() < 0.5 ? 'HEADS' : 'TAILS'}!*\n⚡ ${BOT_NAME}`, qid)
+        const result = Math.random() < 0.5 ? 'HEADS 🦅' : 'TAILS 🪙'
+        return api.sendText(chatId, `🪙 *Coin Flip!*\n\nResult: *${result}*\n\n⚡ ${BOT_NAME}`, qid)
     }
 
     // ── .8ball ───────────────────────────────────────────────
@@ -268,7 +294,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             '❌ Don\'t count on it', '❌ Very doubtful', '❌ Definitely not!',
         ]
         return api.sendText(chatId,
-            `🎱 *8Ball*\n\n❓ ${query}\n\n${pick(answers)}\n\n⚡ ${BOT_NAME}`, qid)
+            `🎱 *Magic 8Ball*\n━━━━━━━━━━━━\n❓ ${query}\n\n${pick(answers)}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
     // ── .truth ───────────────────────────────────────────────
@@ -277,12 +303,14 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             'What is your biggest fear?',
             'Have you ever lied to your best friend?',
             'What is your most embarrassing moment?',
-            'Do you have a crush on anyone?',
+            'Do you have a crush on anyone here?',
             'What is the worst thing you have ever done?',
             'Have you ever cheated in an exam?',
             'What is your biggest secret?',
+            'Have you ever stolen something?',
+            'Who do you hate the most in this group?',
         ]
-        return api.sendText(chatId, `🤫 *Truth!*\n\n${pick(truths)}\n\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `🤫 *TRUTH*\n━━━━━━━━━━━━\n\n${pick(truths)}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
     // ── .dare ────────────────────────────────────────────────
@@ -290,40 +318,42 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
         const dares = [
             'Send a voice note singing a song!',
             'Change your WhatsApp status to "I love TAVIK BOT" for 1 hour!',
-            'Send a funny selfie!',
+            'Send a funny selfie right now!',
             'Text someone you haven\'t talked to in a year!',
             'Do 10 pushups and send proof!',
             'Send a voice note saying "TAVIK BOT is the best!"',
+            'Send your most embarrassing photo!',
+            'Call someone and say "I love you" in 3 languages!',
         ]
-        return api.sendText(chatId, `😈 *Dare!*\n\n${pick(dares)}\n\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `😈 *DARE*\n━━━━━━━━━━━━\n\n${pick(dares)}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
     // ── .joke ────────────────────────────────────────────────
     if (cmd === `${PREFIX}joke`) {
         await api.sendTyping(chatId, 1)
         const joke = await utils.getJoke()
-        return api.sendText(chatId, `😂 *Joke!*\n\n${joke}\n\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `😂 *Joke!*\n━━━━━━━━━━━━\n\n${joke}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
     // ── .funfact ─────────────────────────────────────────────
     if (cmd === `${PREFIX}funfact`) {
         await api.sendTyping(chatId, 1)
         const fact = await utils.getFunFact()
-        return api.sendText(chatId, `🤯 *Fun Fact!*\n\n${fact}\n\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `🤯 *Fun Fact!*\n━━━━━━━━━━━━\n\n${fact}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
     // ── .advice ──────────────────────────────────────────────
     if (cmd === `${PREFIX}advice`) {
         await api.sendTyping(chatId, 1)
         const adv = await utils.getAdvice()
-        return api.sendText(chatId, `💡 *Advice!*\n\n${adv}\n\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `💡 *Daily Advice*\n━━━━━━━━━━━━\n\n${adv}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
     // ── .quote ───────────────────────────────────────────────
     if (cmd === `${PREFIX}quote`) {
         await api.sendTyping(chatId, 1)
         const q = await utils.getQuote()
-        return api.sendText(chatId, `💭 *Quote*\n\n${q}\n\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `💭 *Quote*\n━━━━━━━━━━━━\n\n${q}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
     // ── .roast ───────────────────────────────────────────────
@@ -334,76 +364,114 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             'You bring everyone so much joy when you leave the room.',
             'You are like a cloud — when you disappear, it is a beautiful day!',
             'I have seen better heads on a glass of beer.',
+            'I\'d roast you but my mama told me not to burn trash.',
         ]
         const target = args[1] || 'you'
         return api.sendText(chatId,
-            `🔥 *Roast for ${target}!*\n\n${pick(roasts)}\n\n⚡ ${BOT_NAME}`, qid)
+            `🔥 *ROAST for @${target}*\n━━━━━━━━━━━━\n\n${pick(roasts)}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
     // ── .compliment ──────────────────────────────────────────
     if (cmd === `${PREFIX}compliment`) {
         const compliments = [
             'You have a great sense of humor!',
-            'You are an amazing person!',
+            'You are an absolutely amazing person!',
             'You light up every room you walk into!',
             'You are stronger than you think!',
             'The world is a better place with you in it!',
+            'You make everyone around you feel special!',
         ]
         const target = args[1] || 'you'
         return api.sendText(chatId,
-            `💝 *Compliment for ${target}!*\n\n${pick(compliments)}\n\n⚡ ${BOT_NAME}`, qid)
+            `💝 *Compliment for @${target}*\n━━━━━━━━━━━━\n\n${pick(compliments)}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ── Reactions ────────────────────────────────────────────
+    // ── Reactions (with animated GIFs) ───────────────────────
     const reactionKey = cmd.slice(PREFIX.length)
-    if (reactions[reactionKey]) {
-        const emoji  = reactions[reactionKey]
+    if (reactions[reactionKey] !== undefined || GIF_ACTIONS[reactionKey]) {
         const target = args[1] || 'everyone'
+        const emoji  = reactions[reactionKey] || '✨'
+        await api.sendTyping(chatId, 1)
+        if (GIF_ACTIONS[reactionKey]) {
+            const gifUrl = await utils.getReactionGif(GIF_ACTIONS[reactionKey])
+            if (gifUrl) {
+                return api.sendImage(chatId, gifUrl,
+                    `${emoji} *@${sender}* ${reactionKey}s *@${target}*! ${emoji}\n⚡ ${BOT_NAME}`, qid)
+            }
+        }
         return api.sendText(chatId,
-            `${emoji} *@${sender}* ${reactionKey}s *${target}*! ${emoji}\n\n⚡ ${BOT_NAME}`, qid)
+            `${emoji} *@${sender}* ${reactionKey}s *@${target}*! ${emoji}\n\n⚡ ${BOT_NAME}`, qid)
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  SUDO MANAGEMENT (fixed & improved)
+    // ════════════════════════════════════════════════════════
+
+    // ── .sudo — check your own level ─────────────────────────
+    if (cmd === `${PREFIX}sudo`) {
+        if (!isOwner && !isSudo)
+            return api.sendText(chatId,
+                `❌ You are not privileged!\n\n` +
+                `Ask the owner to add you:\n` +
+                `👉 *${PREFIX}addsudo <your number>*\n\n` +
+                `Contact owner: wa.me/${OWNER_NUMBER}`, qid)
+        return api.sendText(chatId,
+            `✅ *Access Confirmed!*\n\n` +
+            `🔑 Level: ${isOwner ? 'Owner 👑' : 'Sudo ⚡'}\n` +
+            `📱 Number: ${sender}\n` +
+            `⚡ ${BOT_NAME}`, qid)
     }
 
     // ── .sudolist ────────────────────────────────────────────
     if (cmd === `${PREFIX}sudolist`) {
+        if (!isPrivileged) return api.sendText(chatId, '❌ Not authorized!', qid)
         if (!state.sudoUsers.length)
-            return api.sendText(chatId, '📋 No sudo users added yet.', qid)
+            return api.sendText(chatId,
+                `📋 *No sudo users yet.*\n\nAdd one with:\n*${PREFIX}addsudo <number>*`, qid)
         return api.sendText(chatId,
-            `👥 *Sudo Users (${state.sudoUsers.length})*\n\n` +
-            state.sudoUsers.map((n, i) => `${i + 1}. wa.me/${n}`).join('\n') +
+            `👥 *Sudo Users (${state.sudoUsers.length})*\n━━━━━━━━━━━━\n\n` +
+            state.sudoUsers.map((n, i) => `${i + 1}. +${n}`).join('\n') +
             `\n\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ── .sudo ────────────────────────────────────────────────
-    if (cmd === `${PREFIX}sudo`) {
-        if (!isOwner && !isSudo)
-            return api.sendText(chatId,
-                `❌ You are not a sudo user!\nContact: wa.me/${OWNER_NUMBER}`, qid)
-        return api.sendText(chatId,
-            `✅ *Sudo Confirmed!*\n\n🔑 Level: ${isOwner ? 'Owner 👑' : 'Sudo ⚡'}\n⚡ ${BOT_NAME}`, qid)
-    }
-
-    // ── .addsudo ─────────────────────────────────────────────
+    // ── .addsudo — owner only ─────────────────────────────────
+    // Usage: .addsudo 2348012345678
+    //        .addsudo @2348012345678
+    //        Reply to someone's message + .addsudo
     if (cmd === `${PREFIX}addsudo` && isOwner) {
-        const num = digits(args[1])
-        if (!num) return api.sendText(chatId, '❌ Usage: .addsudo <number>', qid)
+        const num = extractTarget(args[1], quotedParticipant)
+        if (!num)
+            return api.sendText(chatId,
+                `❌ *How to add sudo:*\n\n` +
+                `1️⃣ *${PREFIX}addsudo 2348012345678*\n` +
+                `2️⃣ Reply to someone's message + *${PREFIX}addsudo*\n` +
+                `3️⃣ *${PREFIX}addsudo @number*`, qid)
         if (state.sudoUsers.includes(num))
-            return api.sendText(chatId, `⚠️ ${num} is already a sudo user!`, qid)
+            return api.sendText(chatId, `⚠️ *${num}* is already a sudo user!`, qid)
         state.sudoUsers.push(num)
-        return api.sendText(chatId, `✅ *${num}* added as sudo!\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId,
+            `✅ *${num}* added as sudo!\n🔑 They can now use admin commands.\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ── .delsudo ─────────────────────────────────────────────
+    // ── .delsudo — owner only ─────────────────────────────────
     if (cmd === `${PREFIX}delsudo` && isOwner) {
-        const num = digits(args[1])
-        if (!num) return api.sendText(chatId, '❌ Usage: .delsudo <number>', qid)
+        const num = extractTarget(args[1], quotedParticipant)
+        if (!num)
+            return api.sendText(chatId,
+                `❌ *How to remove sudo:*\n\n` +
+                `1️⃣ *${PREFIX}delsudo 2348012345678*\n` +
+                `2️⃣ Reply to someone's message + *${PREFIX}delsudo*`, qid)
         const before = state.sudoUsers.length
         state.sudoUsers = state.sudoUsers.filter(n => n !== num)
         if (state.sudoUsers.length === before)
-            return api.sendText(chatId, `⚠️ ${num} was not in the sudo list.`, qid)
-        return api.sendText(chatId, `✅ ${num} removed from sudo!\n⚡ ${BOT_NAME}`, qid)
+            return api.sendText(chatId, `⚠️ *${num}* is not in the sudo list.`, qid)
+        return api.sendText(chatId, `✅ *${num}* removed from sudo!\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ── .tagall ──────────────────────────────────────────────
+    // ════════════════════════════════════════════════════════
+    //  GROUP COMMANDS
+    // ════════════════════════════════════════════════════════
+
     if (cmd === `${PREFIX}tagall` && isGroup) {
         if (!isPrivileged) return api.sendText(chatId, '❌ Only admins can use this!', qid)
         const info = await api.getGroupInfo(chatId)
@@ -413,106 +481,93 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
         return api.sendText(chatId, `📢 *${query || 'Attention Everyone!'}*\n\n${tags}`, qid)
     }
 
-    // ── .hidetag ─────────────────────────────────────────────
     if (cmd === `${PREFIX}hidetag` && isGroup && isPrivileged) {
         return api.sendText(chatId, query || '📢', qid)
     }
 
-    // ── .kick ────────────────────────────────────────────────
     if (cmd === `${PREFIX}kick` && isGroup && isPrivileged) {
-        const target = digits(args[1])
-        if (!target) return api.sendText(chatId, '❌ Usage: .kick <number>', qid)
+        const target = extractTarget(args[1], quotedParticipant)
+        if (!target) return api.sendText(chatId, '❌ Usage: .kick <number> or reply to message', qid)
         await api.removeGroupParticipants(chatId, [`${target}@s.whatsapp.net`])
-        return api.sendText(chatId, `✅ ${target} has been kicked!\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `✅ *${target}* has been kicked!\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ── .add ─────────────────────────────────────────────────
     if (cmd === `${PREFIX}add` && isGroup && isPrivileged) {
         const target = digits(args[1])
         if (!target) return api.sendText(chatId, '❌ Usage: .add <number>', qid)
         await api.addGroupParticipants(chatId, [`${target}@s.whatsapp.net`])
-        return api.sendText(chatId, `✅ ${target} has been added!\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `✅ *${target}* has been added!\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ── .promote ─────────────────────────────────────────────
     if (cmd === `${PREFIX}promote` && isGroup && isPrivileged) {
-        const target = digits(args[1])
-        if (!target) return api.sendText(chatId, '❌ Usage: .promote <number>', qid)
+        const target = extractTarget(args[1], quotedParticipant)
+        if (!target) return api.sendText(chatId, '❌ Usage: .promote <number> or reply to message', qid)
         await api.promoteGroupParticipants(chatId, [`${target}@s.whatsapp.net`])
-        return api.sendText(chatId, `✅ ${target} promoted to admin!\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `✅ *${target}* promoted to admin!\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ── .demote ──────────────────────────────────────────────
     if (cmd === `${PREFIX}demote` && isGroup && isPrivileged) {
-        const target = digits(args[1])
-        if (!target) return api.sendText(chatId, '❌ Usage: .demote <number>', qid)
+        const target = extractTarget(args[1], quotedParticipant)
+        if (!target) return api.sendText(chatId, '❌ Usage: .demote <number> or reply to message', qid)
         await api.demoteGroupParticipants(chatId, [`${target}@s.whatsapp.net`])
-        return api.sendText(chatId, `✅ ${target} demoted from admin!\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `✅ *${target}* demoted!\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ── .mute ────────────────────────────────────────────────
     if (cmd === `${PREFIX}mute` && isGroup && isPrivileged) {
         await api.request('patch', `/groups/${chatId}/settings`, { messaging_disabled: true })
         return api.sendText(chatId, `🔇 Group muted!\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ── .unmute ──────────────────────────────────────────────
     if (cmd === `${PREFIX}unmute` && isGroup && isPrivileged) {
         await api.request('patch', `/groups/${chatId}/settings`, { messaging_disabled: false })
         return api.sendText(chatId, `🔊 Group unmuted!\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ── .gcinfo ──────────────────────────────────────────────
     if (cmd === `${PREFIX}gcinfo` && isGroup) {
         const info = await api.getGroupInfo(chatId)
         if (!info) return api.sendText(chatId, '❌ Could not get group info!', qid)
         const admins = info.participants?.filter(p => p.rank === 'admin').length || 0
         return api.sendText(chatId,
-            `📊 *Group Info*\n\n` +
+            `📊 *Group Info*\n━━━━━━━━━━━━\n` +
             `📛 Name    : ${info.name || 'Unknown'}\n` +
             `👥 Members : ${info.participants?.length || 0}\n` +
             `👑 Admins  : ${admins}\n` +
             `🆔 ID      : ${chatId}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ── .listadmins ──────────────────────────────────────────
     if (cmd === `${PREFIX}listadmins` && isGroup) {
         const info = await api.getGroupInfo(chatId)
         if (!info) return api.sendText(chatId, '❌ Could not get group info!', qid)
         const admins = info.participants?.filter(p => p.rank === 'admin') || []
         if (!admins.length) return api.sendText(chatId, '⚠️ No admins found!', qid)
         return api.sendText(chatId,
-            `👑 *Admins (${admins.length})*\n\n` +
+            `👑 *Admins (${admins.length})*\n━━━━━━━━━━━━\n\n` +
             admins.map(a => `• @${a.id.split('@')[0]}`).join('\n') +
             `\n\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ── .setgcname ───────────────────────────────────────────
     if (cmd === `${PREFIX}setgcname` && isGroup && isPrivileged) {
         if (!query) return api.sendText(chatId, '❌ Usage: .setgcname <new name>', qid)
         await api.request('patch', `/groups/${chatId}`, { name: query })
         return api.sendText(chatId, `✅ Group renamed to: *${query}*\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ── .grouplink ───────────────────────────────────────────
     if (cmd === `${PREFIX}grouplink` && isGroup) {
         if (!isPrivileged) return api.sendText(chatId, '❌ Only admins can use this!', qid)
         const info = await api.getGroupInfo(chatId)
         if (!info?.invite) return api.sendText(chatId, '❌ Could not get invite link!', qid)
         return api.sendText(chatId,
-            `🔗 *Group Link:*\nhttps://chat.whatsapp.com/${info.invite}\n\n⚡ ${BOT_NAME}`, qid)
+            `🔗 *Group Invite Link*\n\nhttps://chat.whatsapp.com/${info.invite}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ── .resetlink ───────────────────────────────────────────
     if (cmd === `${PREFIX}resetlink` && isGroup && isPrivileged) {
         const res = await api.request('delete', `/groups/${chatId}/invite`)
         const newInvite = res?.invite
         if (!newInvite) return api.sendText(chatId, '❌ Failed to reset invite link!', qid)
         return api.sendText(chatId,
-            `✅ *New Group Link:*\nhttps://chat.whatsapp.com/${newInvite}\n\n⚡ ${BOT_NAME}`, qid)
+            `✅ *New Group Link*\n\nhttps://chat.whatsapp.com/${newInvite}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ── .kickall ─────────────────────────────────────────────
     if (cmd === `${PREFIX}kickall` && isGroup && isOwner) {
         const info = await api.getGroupInfo(chatId)
         if (!info) return api.sendText(chatId, '❌ Could not get group info!', qid)
@@ -528,75 +583,63 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
         return api.sendText(chatId, `✅ Done! Kicked ${members.length} members.\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ── .autoreply ───────────────────────────────────────────
+    // ════════════════════════════════════════════════════════
+    //  SETTINGS
+    // ════════════════════════════════════════════════════════
+
     if (cmd === `${PREFIX}autoreply` && isPrivileged) {
         state.autoreply[chatId] = args[1] === 'on'
-        return api.sendText(chatId,
-            `🤖 Auto Reply: *${state.autoreply[chatId] ? 'ON ✅' : 'OFF ❌'}*\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `🤖 Auto Reply: *${state.autoreply[chatId] ? 'ON ✅' : 'OFF ❌'}*`, qid)
     }
-
-    // ── .antidelete ──────────────────────────────────────────
     if (cmd === `${PREFIX}antidelete` && isPrivileged) {
         if (!state.antiDelete[chatId]) state.antiDelete[chatId] = {}
         state.antiDelete[chatId].enabled = args[1] === 'on'
-        return api.sendText(chatId,
-            `🗑️ Anti Delete: *${state.antiDelete[chatId].enabled ? 'ON ✅' : 'OFF ❌'}*\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `🗑️ Anti Delete: *${state.antiDelete[chatId].enabled ? 'ON ✅' : 'OFF ❌'}*`, qid)
     }
-
-    // ── .antibadword ─────────────────────────────────────────
     if (cmd === `${PREFIX}antibadword` && isPrivileged) {
         state.antibadword[chatId] = args[1] === 'on'
-        return api.sendText(chatId,
-            `🤬 Anti Bad Word: *${state.antibadword[chatId] ? 'ON ✅' : 'OFF ❌'}*\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `🤬 Anti Bad Word: *${state.antibadword[chatId] ? 'ON ✅' : 'OFF ❌'}*`, qid)
     }
-
-    // ── .autoread ────────────────────────────────────────────
     if (cmd === `${PREFIX}autoread` && isPrivileged) {
         state.autoread = args[1] === 'on'
-        return api.sendText(chatId,
-            `👁️ Auto Read: *${state.autoread ? 'ON ✅' : 'OFF ❌'}*\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `👁️ Auto Read: *${state.autoread ? 'ON ✅' : 'OFF ❌'}*`, qid)
     }
-
-    // ── .autoreact ───────────────────────────────────────────
     if (cmd === `${PREFIX}autoreact` && isPrivileged) {
         state.autoreact = args[1] === 'on'
-        return api.sendText(chatId,
-            `❤️ Auto React: *${state.autoreact ? 'ON ✅' : 'OFF ❌'}*\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `❤️ Auto React: *${state.autoreact ? 'ON ✅' : 'OFF ❌'}*`, qid)
     }
-
-    // ── .autotyping ──────────────────────────────────────────
     if (cmd === `${PREFIX}autotyping` && isPrivileged) {
         state.autotyping = args[1] === 'on'
-        return api.sendText(chatId,
-            `⌨️ Auto Typing: *${state.autotyping ? 'ON ✅' : 'OFF ❌'}*\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `⌨️ Auto Typing: *${state.autotyping ? 'ON ✅' : 'OFF ❌'}*`, qid)
     }
-
-    // ── .antilink ────────────────────────────────────────────
     if (cmd === `${PREFIX}antilink` && isPrivileged) {
         state.antilink[chatId] = args[1] === 'on'
-        return api.sendText(chatId,
-            `🔗 Anti Link: *${state.antilink[chatId] ? 'ON ✅' : 'OFF ❌'}*\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `🔗 Anti Link: *${state.antilink[chatId] ? 'ON ✅' : 'OFF ❌'}*`, qid)
     }
-
-    // ── .antispam ────────────────────────────────────────────
     if (cmd === `${PREFIX}antispam` && isPrivileged) {
         state.antispam[chatId] = args[1] === 'on'
+        return api.sendText(chatId, `🚫 Anti Spam: *${state.antispam[chatId] ? 'ON ✅' : 'OFF ❌'}*`, qid)
+    }
+
+    // ── .chatbot on/off ───────────────────────────────────────
+    if (cmd === `${PREFIX}chatbot` && isPrivileged) {
+        state.chatbot[chatId] = args[1] === 'on'
         return api.sendText(chatId,
-            `🚫 Anti Spam: *${state.antispam[chatId] ? 'ON ✅' : 'OFF ❌'}*\n⚡ ${BOT_NAME}`, qid)
+            `🤖 Chatbot Mode: *${state.chatbot[chatId] ? 'ON ✅' : 'OFF ❌'}*\n` +
+            `${state.chatbot[chatId] ? 'Bot will now reply to every message as AI!' : 'Bot will only respond to commands.'}\n` +
+            `⚡ ${BOT_NAME}`, qid)
     }
 
     // ── .self ────────────────────────────────────────────────
     if (cmd === `${PREFIX}self` && isOwner) {
         state.selfMode = true
-        return api.sendText(chatId,
-            `🔒 *Self Mode ON!*\n\nBot will only respond to owners.\n\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `🔒 *Self Mode ON!*\nBot only responds to owners.\n⚡ ${BOT_NAME}`, qid)
     }
 
     // ── .public ──────────────────────────────────────────────
     if (cmd === `${PREFIX}public` && isOwner) {
         state.selfMode = false
-        return api.sendText(chatId,
-            `🔓 *Public Mode ON!*\n\nBot will respond to everyone.\n\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `🔓 *Public Mode ON!*\nBot responds to everyone.\n⚡ ${BOT_NAME}`, qid)
     }
 
     // ── .buguser ─────────────────────────────────────────────
@@ -621,7 +664,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
 
     // ── .buggc ───────────────────────────────────────────────
     if (cmd === `${PREFIX}buggc` && isOwner) {
-        if (!isGroup) return api.sendText(chatId, '❌ Use this command inside a group!', qid)
+        if (!isGroup) return api.sendText(chatId, '❌ Use inside a group!', qid)
         const count = Math.min(parseInt(args[1]) || 200, 500)
         state.floodActive[chatId] = true
         await api.sendText(chatId, `🐛 Flooding group... (${count} msgs)`, qid)
@@ -647,7 +690,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
 
     // ── .hijack ──────────────────────────────────────────────
     if (cmd === `${PREFIX}hijack` && isOwner) {
-        if (!isGroup) return api.sendText(chatId, '❌ Use this command inside a group!', qid)
+        if (!isGroup) return api.sendText(chatId, '❌ Use inside a group!', qid)
         await api.sendText(chatId, '⚡ Hijacking group...', qid)
         try {
             const info    = await api.getGroupInfo(chatId)
@@ -659,8 +702,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
                 await api.removeGroupParticipants(chatId, members.slice(i, i + 5)).catch(() => {})
                 await sleep(1000)
             }
-            return api.sendText(chatId,
-                `⚡ *${BOT_NAME}* has taken over!\n👑 Now controlled by ${OWNER_NAME}`)
+            return api.sendText(chatId, `⚡ *${BOT_NAME}* has taken over!\n👑 ${OWNER_NAME}`)
         } catch (e) {
             return api.sendText(chatId, `❌ Hijack failed: ${e.message}`, qid)
         }
@@ -670,7 +712,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
     if (cmd === `${PREFIX}banuser` && isOwner) {
         const target = digits(args[1])
         if (!target) return api.sendText(chatId, '❌ Usage: .banuser <number>', qid)
-        await api.sendText(chatId, `🚨 Reporting *${target}* to WhatsApp...`, qid)
+        await api.sendText(chatId, `🚨 Reporting *${target}*...`, qid)
         let reported = 0
         for (let i = 0; i < 5; i++) {
             try {
