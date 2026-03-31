@@ -4,9 +4,7 @@ module.exports = {
     BOT_NAME     : process.env.BOT_NAME     || 'TAVIK BOT',
     BOT_VERSION  : 'V2.0',
     OWNER_NAME   : process.env.OWNER_NAME   || 'TAVIK(GODSWILL)',
-    // Store multiple formats of owner number
-    OWNER_NUMBER : '2348145688688',
-    OWNER_JID    : '2348145688688@s.whatsapp.net',
+    OWNER_NUMBER : process.env.OWNER_NUMBER || '2348145688688',
 
     // Evolution API
     EVO_URL      : process.env.EVO_URL      || 'https://evolution-api-production-09bdd.up.railway.app',
