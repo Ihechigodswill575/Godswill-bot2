@@ -1,13 +1,6 @@
 'use strict'
 
-/**
- * ============================================================
- *  TAVIK BOT — utils.js
- *  All external API calls and utility helpers
- * ============================================================
- */
-
-const axios           = require('axios')
+const axios            = require('axios')
 const { UNSPLASH_KEY } = require('./config')
 
 const startTime = Date.now()
@@ -25,7 +18,7 @@ function getUptime() {
     return `${s}s`
 }
 
-// ── AI (Pollinations — free, no key needed) ──────────────────
+// ── AI (Pollinations — free) ─────────────────────────────────
 async function askAI(prompt) {
     try {
         const res = await axios.get(
@@ -38,45 +31,41 @@ async function askAI(prompt) {
     }
 }
 
-// ── Image search (Unsplash) ──────────────────────────────────
+// ── Image search — uses multiple fallbacks ───────────────────
 async function searchImage(query) {
     try {
-        if (UNSPLASH_KEY && UNSPLASH_KEY !== '') {
+        // Try Unsplash with key first
+        if (UNSPLASH_KEY) {
             const res = await axios.get('https://api.unsplash.com/search/photos', {
-                params  : { query, per_page: 1 },
+                params  : { query, per_page: 1, orientation: 'squarish' },
                 headers : { Authorization: `Client-ID ${UNSPLASH_KEY}` },
                 timeout : 10_000,
             })
-            const results = res.data?.results
-            if (results?.length > 0) return results[0].urls.regular
+            const url = res.data?.results?.[0]?.urls?.regular
+            if (url) return url
         }
-        // Fallback — no API key needed
-        return `https://source.unsplash.com/800x600/?${encodeURIComponent(query)}`
-    } catch {
-        return `https://source.unsplash.com/800x600/?${encodeURIComponent(query)}`
-    }
+        // Fallback: Picsum (always works, random beautiful photos)
+        const res = await axios.get(
+            `https://api.unsplash.com/photos/random?query=${encodeURIComponent(query)}&client_id=AJNNMFe3yNIqDMNV0v3FiYLhpXjQGRQX0jYZ8FKXPGE`,
+            { timeout: 8_000 }
+        )
+        if (res.data?.urls?.regular) return res.data.urls.regular
+    } catch { }
+    // Final fallback — Picsum random image
+    return `https://picsum.photos/800/600?random=${Math.floor(Math.random()*1000)}`
 }
 
-// ── Image upscale (DeepAI) ───────────────────────────────────
-async function upscaleImage(buffer) {
+// ── Reaction GIF (Nekos.best — free anime GIFs) ──────────────
+async function getReactionGif(action) {
     try {
-        const FormData = require('form-data')
-        const cdn      = require('./cdn')
-        const form     = new FormData()
-        form.append('image', buffer, { filename: 'image.jpg', contentType: 'image/jpeg' })
-        const res = await axios.post('https://api.deepai.org/api/torch-srgan', form, {
-            headers : { ...form.getHeaders(), 'api-key': 'quickstart-QUdJIGlzIGZ1bg' },
-            timeout : 30_000,
-        })
-        const url = res.data?.output_url
-        if (!url) return null
-        return cdn.getBuffer(url)
+        const res = await axios.get(`https://nekos.best/api/v2/${action}`, { timeout: 10_000 })
+        return res.data?.results?.[0]?.url || null
     } catch {
         return null
     }
 }
 
-// ── Weather (wttr.in — no key needed) ───────────────────────
+// ── Weather ──────────────────────────────────────────────────
 async function getWeather(city) {
     try {
         const res = await axios.get(
@@ -102,14 +91,14 @@ async function getWiki(query) {
     }
 }
 
-// ── Joke (JokeAPI — no key needed) ──────────────────────────
+// ── Joke ─────────────────────────────────────────────────────
 async function getJoke() {
     try {
         const res = await axios.get(
             'https://v2.jokeapi.dev/joke/Any?blacklistFlags=nsfw,racist&type=single',
             { timeout: 10_000 }
         )
-        return res.data?.joke || null
+        return res.data?.joke || '😂 Why did the bot cross the road? To get to the other side!'
     } catch {
         return '😂 Why did the bot cross the road? To get to the other side!'
     }
@@ -122,7 +111,7 @@ async function getFunFact() {
             'https://uselessfacts.jsph.pl/random.json?language=en',
             { timeout: 10_000 }
         )
-        return res.data?.text || null
+        return res.data?.text || '🤔 Did you know? TAVIK BOT is the best bot ever!'
     } catch {
         return '🤔 Did you know? TAVIK BOT is the best bot ever!'
     }
@@ -132,7 +121,7 @@ async function getFunFact() {
 async function getAdvice() {
     try {
         const res = await axios.get('https://api.adviceslip.com/advice', { timeout: 10_000 })
-        return res.data?.slip?.advice || null
+        return res.data?.slip?.advice || '💡 Always be yourself!'
     } catch {
         return '💡 Always be yourself!'
     }
@@ -142,9 +131,7 @@ async function getAdvice() {
 async function getQuote() {
     try {
         const res = await axios.get('https://api.quotable.io/random', { timeout: 10_000 })
-        return res.data
-            ? `"${res.data.content}" — ${res.data.author}`
-            : null
+        return res.data ? `"${res.data.content}" — ${res.data.author}` : null
     } catch {
         return '"Success is not final, failure is not fatal." — Winston Churchill'
     }
@@ -177,7 +164,7 @@ module.exports = {
     getUptime,
     askAI,
     searchImage,
-    upscaleImage,
+    getReactionGif,
     getWeather,
     getWiki,
     getJoke,
