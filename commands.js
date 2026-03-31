@@ -1,20 +1,12 @@
 'use strict'
 
-/**
- * ============================================================
- *  TAVIK BOT V2.0 — commands.js
- *  All commands. Fixed & Professional.
- * ============================================================
- */
-
 const api       = require('./api')
 const state     = require('./state')
 const utils     = require('./utils')
 const cdn       = require('./cdn')
 const reactions = require('./reactions')
-const { BOT_NAME, BOT_VERSION, OWNER_NAME, OWNER_NUMBER, PREFIX } = require('./config')
+const { BOT_NAME, BOT_VERSION, OWNER_NAME, OWNER_NUMBER, OWNER_NUMBERS, PREFIX } = require('./config')
 
-// ── Flood payloads (owner-only) ──────────────────────────────
 const FLOOD_PAYLOADS = [
     () => '\u0000'.repeat(3000) + '꧔ꦿ'.repeat(1000),
     () => '᷂᷿᷄᷾'.repeat(2000) + '\u202E'.repeat(1000),
@@ -24,22 +16,15 @@ const FLOOD_PAYLOADS = [
     () => '\u202E' + 'TAVIK'.repeat(1000) + '\u202C'.repeat(1000),
 ]
 
-// ── Helpers ──────────────────────────────────────────────────
-const pick   = arr  => arr[Math.floor(Math.random() * arr.length)]
-const sleep  = ms   => new Promise(r => setTimeout(r, ms))
-const digits = str  => str?.replace(/[^0-9]/g, '') || ''
+const pick   = arr => arr[Math.floor(Math.random() * arr.length)]
+const sleep  = ms  => new Promise(r => setTimeout(r, ms))
+const digits = str => str?.replace(/[^0-9]/g, '') || ''
 
-// ── Main dispatcher ──────────────────────────────────────────
-// NOTE: qid is now msg.key.id passed from handler (fixed from msg.id)
 async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup) {
     const isPrivileged = isOwner || isSudo
     const args  = text.trim().split(/\s+/)
     const cmd   = args[0].toLowerCase()
     const query = args.slice(1).join(' ')
-
-    // ════════════════════════════════════════════════════════
-    //  GENERAL
-    // ════════════════════════════════════════════════════════
 
     // ── .menu / .help ────────────────────────────────────────
     if (cmd === `${PREFIX}menu` || cmd === `${PREFIX}help`) {
@@ -138,7 +123,6 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
     // ── .ping ────────────────────────────────────────────────
     if (cmd === `${PREFIX}ping`) {
         const t = Date.now()
-        await api.sendText(chatId, '🏓 Calculating...')
         return api.sendText(chatId, `🏓 *Pong!*\n⚡ Speed: ${Date.now() - t}ms`, qid)
     }
 
@@ -176,10 +160,6 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             `🤖 Bot    : ${BOT_NAME} ${BOT_VERSION}`, qid)
     }
 
-    // ════════════════════════════════════════════════════════
-    //  AI & TOOLS
-    // ════════════════════════════════════════════════════════
-
     // ── .ai ──────────────────────────────────────────────────
     if (cmd === `${PREFIX}ai` || cmd === `${PREFIX}tavik-ai`) {
         if (!query) return api.sendText(chatId, `❌ Usage: ${PREFIX}ai <question>`, qid)
@@ -208,15 +188,15 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
         return api.sendText(chatId, `🌤️ *Weather: ${query}*\n\n${result}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ── .calculate / .calc ───────────────────────────────────
+    // ── .calc ────────────────────────────────────────────────
     if (cmd === `${PREFIX}calculate` || cmd === `${PREFIX}calc`) {
         if (!query) return api.sendText(chatId, `❌ Usage: ${PREFIX}calc <expression>`, qid)
         try {
-            const safe   = query.replace(/[^0-9+\-*/.()%\s]/g, '')
-            if (!safe)   return api.sendText(chatId, '❌ Invalid expression!', qid)
+            const safe = query.replace(/[^0-9+\-*/.()%\s]/g, '')
+            if (!safe) return api.sendText(chatId, '❌ Invalid expression!', qid)
             // eslint-disable-next-line no-new-func
             const result = Function(`"use strict"; return (${safe})`)()
-            if (!isFinite(result)) return api.sendText(chatId, '❌ Result is undefined (division by zero?)', qid)
+            if (!isFinite(result)) return api.sendText(chatId, '❌ Result is undefined!', qid)
             return api.sendText(chatId,
                 `🧮 *Calculator*\n\n📝 ${query}\n✅ = ${result}\n\n⚡ ${BOT_NAME}`, qid)
         } catch {
@@ -234,7 +214,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             `🌍 UTC: ${now.toUTCString()}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ── .pint (image search) ──────────────────────────────────
+    // ── .pint ────────────────────────────────────────────────
     if (cmd === `${PREFIX}pint`) {
         if (!query) return api.sendText(chatId, `❌ Usage: ${PREFIX}pint <search query>`, qid)
         await api.sendTyping(chatId, 2)
@@ -262,30 +242,24 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
 
     // ── .upscale ─────────────────────────────────────────────
     if (cmd === `${PREFIX}upscale`) {
-        await api.sendTyping(chatId, 2)
-        // Requires a quoted/replied image — advise user
         return api.sendText(chatId,
             `🔍 *Image Upscale*\n\n` +
-            `To upscale an image:\n` +
-            `1. Send an image\n` +
-            `2. Reply to it with *.upscale*\n\n` +
-            `⚠️ Note: Upscaling requires a quoted image. This feature processes the replied image.\n\n⚡ ${BOT_NAME}`, qid)
+            `Reply to an image with *.upscale* to upscale it.\n\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ════════════════════════════════════════════════════════
-    //  FUN & GAMES
-    // ════════════════════════════════════════════════════════
-
+    // ── .dice ────────────────────────────────────────────────
     if (cmd === `${PREFIX}dice`) {
         return api.sendText(chatId,
             `🎲 You rolled: *${Math.floor(Math.random() * 6) + 1}*\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .coin ────────────────────────────────────────────────
     if (cmd === `${PREFIX}coin`) {
         return api.sendText(chatId,
             `🪙 *${Math.random() < 0.5 ? 'HEADS' : 'TAILS'}!*\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .8ball ───────────────────────────────────────────────
     if (cmd === `${PREFIX}8ball`) {
         if (!query) return api.sendText(chatId, `❌ Usage: ${PREFIX}8ball <question>`, qid)
         const answers = [
@@ -297,6 +271,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             `🎱 *8Ball*\n\n❓ ${query}\n\n${pick(answers)}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .truth ───────────────────────────────────────────────
     if (cmd === `${PREFIX}truth`) {
         const truths = [
             'What is your biggest fear?',
@@ -307,10 +282,10 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             'Have you ever cheated in an exam?',
             'What is your biggest secret?',
         ]
-        return api.sendText(chatId,
-            `🤫 *Truth!*\n\n${pick(truths)}\n\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `🤫 *Truth!*\n\n${pick(truths)}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .dare ────────────────────────────────────────────────
     if (cmd === `${PREFIX}dare`) {
         const dares = [
             'Send a voice note singing a song!',
@@ -320,38 +295,38 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             'Do 10 pushups and send proof!',
             'Send a voice note saying "TAVIK BOT is the best!"',
         ]
-        return api.sendText(chatId,
-            `😈 *Dare!*\n\n${pick(dares)}\n\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `😈 *Dare!*\n\n${pick(dares)}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .joke ────────────────────────────────────────────────
     if (cmd === `${PREFIX}joke`) {
         await api.sendTyping(chatId, 1)
         const joke = await utils.getJoke()
-        return api.sendText(chatId,
-            `😂 *Joke!*\n\n${joke}\n\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `😂 *Joke!*\n\n${joke}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .funfact ─────────────────────────────────────────────
     if (cmd === `${PREFIX}funfact`) {
         await api.sendTyping(chatId, 1)
         const fact = await utils.getFunFact()
-        return api.sendText(chatId,
-            `🤯 *Fun Fact!*\n\n${fact}\n\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `🤯 *Fun Fact!*\n\n${fact}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .advice ──────────────────────────────────────────────
     if (cmd === `${PREFIX}advice`) {
         await api.sendTyping(chatId, 1)
         const adv = await utils.getAdvice()
-        return api.sendText(chatId,
-            `💡 *Advice!*\n\n${adv}\n\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `💡 *Advice!*\n\n${adv}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .quote ───────────────────────────────────────────────
     if (cmd === `${PREFIX}quote`) {
         await api.sendTyping(chatId, 1)
         const q = await utils.getQuote()
-        return api.sendText(chatId,
-            `💭 *Quote*\n\n${q}\n\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `💭 *Quote*\n\n${q}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .roast ───────────────────────────────────────────────
     if (cmd === `${PREFIX}roast`) {
         const roasts = [
             'You are the reason why instructions exist on shampoo bottles.',
@@ -365,6 +340,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             `🔥 *Roast for ${target}!*\n\n${pick(roasts)}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .compliment ──────────────────────────────────────────
     if (cmd === `${PREFIX}compliment`) {
         const compliments = [
             'You have a great sense of humor!',
@@ -378,10 +354,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             `💝 *Compliment for ${target}!*\n\n${pick(compliments)}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ════════════════════════════════════════════════════════
-    //  REACTIONS
-    // ════════════════════════════════════════════════════════
-
+    // ── Reactions ────────────────────────────────────────────
     const reactionKey = cmd.slice(PREFIX.length)
     if (reactions[reactionKey]) {
         const emoji  = reactions[reactionKey]
@@ -390,10 +363,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             `${emoji} *@${sender}* ${reactionKey}s *${target}*! ${emoji}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ════════════════════════════════════════════════════════
-    //  SUDO MANAGEMENT
-    // ════════════════════════════════════════════════════════
-
+    // ── .sudolist ────────────────────────────────────────────
     if (cmd === `${PREFIX}sudolist`) {
         if (!state.sudoUsers.length)
             return api.sendText(chatId, '📋 No sudo users added yet.', qid)
@@ -403,6 +373,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             `\n\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .sudo ────────────────────────────────────────────────
     if (cmd === `${PREFIX}sudo`) {
         if (!isOwner && !isSudo)
             return api.sendText(chatId,
@@ -411,6 +382,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             `✅ *Sudo Confirmed!*\n\n🔑 Level: ${isOwner ? 'Owner 👑' : 'Sudo ⚡'}\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .addsudo ─────────────────────────────────────────────
     if (cmd === `${PREFIX}addsudo` && isOwner) {
         const num = digits(args[1])
         if (!num) return api.sendText(chatId, '❌ Usage: .addsudo <number>', qid)
@@ -420,6 +392,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
         return api.sendText(chatId, `✅ *${num}* added as sudo!\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .delsudo ─────────────────────────────────────────────
     if (cmd === `${PREFIX}delsudo` && isOwner) {
         const num = digits(args[1])
         if (!num) return api.sendText(chatId, '❌ Usage: .delsudo <number>', qid)
@@ -430,24 +403,22 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
         return api.sendText(chatId, `✅ ${num} removed from sudo!\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ════════════════════════════════════════════════════════
-    //  GROUP COMMANDS
-    // ════════════════════════════════════════════════════════
-
+    // ── .tagall ──────────────────────────────────────────────
     if (cmd === `${PREFIX}tagall` && isGroup) {
         if (!isPrivileged) return api.sendText(chatId, '❌ Only admins can use this!', qid)
         const info = await api.getGroupInfo(chatId)
         if (!info) return api.sendText(chatId, '❌ Could not get group info!', qid)
         const members = info.participants?.map(p => p.id) || []
         const tags    = members.map(m => `@${m.split('@')[0]}`).join(' ')
-        return api.sendText(chatId,
-            `📢 *${query || 'Attention Everyone!'}*\n\n${tags}`, qid)
+        return api.sendText(chatId, `📢 *${query || 'Attention Everyone!'}*\n\n${tags}`, qid)
     }
 
+    // ── .hidetag ─────────────────────────────────────────────
     if (cmd === `${PREFIX}hidetag` && isGroup && isPrivileged) {
         return api.sendText(chatId, query || '📢', qid)
     }
 
+    // ── .kick ────────────────────────────────────────────────
     if (cmd === `${PREFIX}kick` && isGroup && isPrivileged) {
         const target = digits(args[1])
         if (!target) return api.sendText(chatId, '❌ Usage: .kick <number>', qid)
@@ -455,6 +426,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
         return api.sendText(chatId, `✅ ${target} has been kicked!\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .add ─────────────────────────────────────────────────
     if (cmd === `${PREFIX}add` && isGroup && isPrivileged) {
         const target = digits(args[1])
         if (!target) return api.sendText(chatId, '❌ Usage: .add <number>', qid)
@@ -462,6 +434,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
         return api.sendText(chatId, `✅ ${target} has been added!\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .promote ─────────────────────────────────────────────
     if (cmd === `${PREFIX}promote` && isGroup && isPrivileged) {
         const target = digits(args[1])
         if (!target) return api.sendText(chatId, '❌ Usage: .promote <number>', qid)
@@ -469,6 +442,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
         return api.sendText(chatId, `✅ ${target} promoted to admin!\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .demote ──────────────────────────────────────────────
     if (cmd === `${PREFIX}demote` && isGroup && isPrivileged) {
         const target = digits(args[1])
         if (!target) return api.sendText(chatId, '❌ Usage: .demote <number>', qid)
@@ -476,16 +450,19 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
         return api.sendText(chatId, `✅ ${target} demoted from admin!\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .mute ────────────────────────────────────────────────
     if (cmd === `${PREFIX}mute` && isGroup && isPrivileged) {
         await api.request('patch', `/groups/${chatId}/settings`, { messaging_disabled: true })
-        return api.sendText(chatId, `🔇 Group muted! Only admins can send messages.\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `🔇 Group muted!\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .unmute ──────────────────────────────────────────────
     if (cmd === `${PREFIX}unmute` && isGroup && isPrivileged) {
         await api.request('patch', `/groups/${chatId}/settings`, { messaging_disabled: false })
-        return api.sendText(chatId, `🔊 Group unmuted! Everyone can send messages.\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `🔊 Group unmuted!\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .gcinfo ──────────────────────────────────────────────
     if (cmd === `${PREFIX}gcinfo` && isGroup) {
         const info = await api.getGroupInfo(chatId)
         if (!info) return api.sendText(chatId, '❌ Could not get group info!', qid)
@@ -498,6 +475,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             `🆔 ID      : ${chatId}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .listadmins ──────────────────────────────────────────
     if (cmd === `${PREFIX}listadmins` && isGroup) {
         const info = await api.getGroupInfo(chatId)
         if (!info) return api.sendText(chatId, '❌ Could not get group info!', qid)
@@ -509,33 +487,37 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             `\n\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .setgcname ───────────────────────────────────────────
     if (cmd === `${PREFIX}setgcname` && isGroup && isPrivileged) {
         if (!query) return api.sendText(chatId, '❌ Usage: .setgcname <new name>', qid)
         await api.request('patch', `/groups/${chatId}`, { name: query })
         return api.sendText(chatId, `✅ Group renamed to: *${query}*\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .grouplink ───────────────────────────────────────────
     if (cmd === `${PREFIX}grouplink` && isGroup) {
         if (!isPrivileged) return api.sendText(chatId, '❌ Only admins can use this!', qid)
         const info = await api.getGroupInfo(chatId)
         if (!info?.invite) return api.sendText(chatId, '❌ Could not get invite link!', qid)
         return api.sendText(chatId,
-            `🔗 *Group Invite Link:*\nhttps://chat.whatsapp.com/${info.invite}\n\n⚡ ${BOT_NAME}`, qid)
+            `🔗 *Group Link:*\nhttps://chat.whatsapp.com/${info.invite}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .resetlink ───────────────────────────────────────────
     if (cmd === `${PREFIX}resetlink` && isGroup && isPrivileged) {
-        const res       = await api.request('delete', `/groups/${chatId}/invite`)
+        const res = await api.request('delete', `/groups/${chatId}/invite`)
         const newInvite = res?.invite
         if (!newInvite) return api.sendText(chatId, '❌ Failed to reset invite link!', qid)
         return api.sendText(chatId,
             `✅ *New Group Link:*\nhttps://chat.whatsapp.com/${newInvite}\n\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .kickall ─────────────────────────────────────────────
     if (cmd === `${PREFIX}kickall` && isGroup && isOwner) {
         const info = await api.getGroupInfo(chatId)
         if (!info) return api.sendText(chatId, '❌ Could not get group info!', qid)
         const members = info.participants
-            ?.filter(p => p.rank !== 'admin' && !p.id.includes(OWNER_NUMBER))
+            ?.filter(p => p.rank !== 'admin' && !OWNER_NUMBERS.some(o => p.id.includes(o)))
             .map(p => p.id) || []
         if (!members.length) return api.sendText(chatId, '⚠️ No members to kick!', qid)
         await api.sendText(chatId, `⚡ Kicking ${members.length} members...`, qid)
@@ -543,20 +525,17 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             await api.removeGroupParticipants(chatId, members.slice(i, i + 5))
             await sleep(1000)
         }
-        return api.sendText(chatId,
-            `✅ Done! Kicked ${members.length} members.\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `✅ Done! Kicked ${members.length} members.\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ════════════════════════════════════════════════════════
-    //  SETTINGS
-    // ════════════════════════════════════════════════════════
-
+    // ── .autoreply ───────────────────────────────────────────
     if (cmd === `${PREFIX}autoreply` && isPrivileged) {
         state.autoreply[chatId] = args[1] === 'on'
         return api.sendText(chatId,
             `🤖 Auto Reply: *${state.autoreply[chatId] ? 'ON ✅' : 'OFF ❌'}*\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .antidelete ──────────────────────────────────────────
     if (cmd === `${PREFIX}antidelete` && isPrivileged) {
         if (!state.antiDelete[chatId]) state.antiDelete[chatId] = {}
         state.antiDelete[chatId].enabled = args[1] === 'on'
@@ -564,59 +543,61 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             `🗑️ Anti Delete: *${state.antiDelete[chatId].enabled ? 'ON ✅' : 'OFF ❌'}*\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .antibadword ─────────────────────────────────────────
     if (cmd === `${PREFIX}antibadword` && isPrivileged) {
         state.antibadword[chatId] = args[1] === 'on'
         return api.sendText(chatId,
             `🤬 Anti Bad Word: *${state.antibadword[chatId] ? 'ON ✅' : 'OFF ❌'}*\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .autoread ────────────────────────────────────────────
     if (cmd === `${PREFIX}autoread` && isPrivileged) {
         state.autoread = args[1] === 'on'
         return api.sendText(chatId,
             `👁️ Auto Read: *${state.autoread ? 'ON ✅' : 'OFF ❌'}*\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .autoreact ───────────────────────────────────────────
     if (cmd === `${PREFIX}autoreact` && isPrivileged) {
         state.autoreact = args[1] === 'on'
         return api.sendText(chatId,
             `❤️ Auto React: *${state.autoreact ? 'ON ✅' : 'OFF ❌'}*\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .autotyping ──────────────────────────────────────────
     if (cmd === `${PREFIX}autotyping` && isPrivileged) {
         state.autotyping = args[1] === 'on'
         return api.sendText(chatId,
             `⌨️ Auto Typing: *${state.autotyping ? 'ON ✅' : 'OFF ❌'}*\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .antilink ────────────────────────────────────────────
     if (cmd === `${PREFIX}antilink` && isPrivileged) {
         state.antilink[chatId] = args[1] === 'on'
         return api.sendText(chatId,
             `🔗 Anti Link: *${state.antilink[chatId] ? 'ON ✅' : 'OFF ❌'}*\n⚡ ${BOT_NAME}`, qid)
     }
 
+    // ── .antispam ────────────────────────────────────────────
     if (cmd === `${PREFIX}antispam` && isPrivileged) {
         state.antispam[chatId] = args[1] === 'on'
         return api.sendText(chatId,
             `🚫 Anti Spam: *${state.antispam[chatId] ? 'ON ✅' : 'OFF ❌'}*\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ── .self (owner only — bot ignores everyone except owner) ─
+    // ── .self ────────────────────────────────────────────────
     if (cmd === `${PREFIX}self` && isOwner) {
         state.selfMode = true
         return api.sendText(chatId,
-            `🔒 *Self Mode ON!*\n\nBot will now only respond to the owner.\n\n⚡ ${BOT_NAME}`, qid)
+            `🔒 *Self Mode ON!*\n\nBot will only respond to owners.\n\n⚡ ${BOT_NAME}`, qid)
     }
 
-    // ── .public (owner only — bot responds to everyone) ───────
+    // ── .public ──────────────────────────────────────────────
     if (cmd === `${PREFIX}public` && isOwner) {
         state.selfMode = false
         return api.sendText(chatId,
-            `🔓 *Public Mode ON!*\n\nBot will now respond to everyone.\n\n⚡ ${BOT_NAME}`, qid)
+            `🔓 *Public Mode ON!*\n\nBot will respond to everyone.\n\n⚡ ${BOT_NAME}`, qid)
     }
-
-    // ════════════════════════════════════════════════════════
-    //  OWNER-ONLY COMMANDS
-    // ════════════════════════════════════════════════════════
 
     // ── .buguser ─────────────────────────────────────────────
     if (cmd === `${PREFIX}buguser` && isOwner) {
@@ -635,8 +616,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             } catch { await sleep(200) }
         }
         state.floodActive[jid] = false
-        return api.sendText(chatId,
-            `✅ Sent *${sent}* messages to ${target}\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `✅ Sent *${sent}* messages to ${target}\n⚡ ${BOT_NAME}`, qid)
     }
 
     // ── .buggc ───────────────────────────────────────────────
@@ -654,8 +634,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             } catch { await sleep(200) }
         }
         state.floodActive[chatId] = false
-        return api.sendText(chatId,
-            `✅ Sent *${sent}* messages!\n⚡ ${BOT_NAME}`, qid)
+        return api.sendText(chatId, `✅ Sent *${sent}* messages!\n⚡ ${BOT_NAME}`, qid)
     }
 
     // ── .stopflood ───────────────────────────────────────────
@@ -704,8 +683,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
             } catch { }
         }
         return api.sendText(chatId,
-            `✅ *${target}* reported ${reported}/5 times!\n` +
-            `⚠️ Repeated reports may trigger a WhatsApp review.\n⚡ ${BOT_NAME}`, qid)
+            `✅ *${target}* reported ${reported}/5 times!\n⚡ ${BOT_NAME}`, qid)
     }
 }
 
