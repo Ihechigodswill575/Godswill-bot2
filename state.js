@@ -8,9 +8,10 @@ module.exports = {
     antilink    : {},
     antispam    : {},
     spamCount   : {},
+    chatbot     : {},   // per-chat chatbot mode
     autoread    : false,
     autoreact   : false,
     autotyping  : false,
-    floodActive : {},
     selfMode    : false,
+    floodActive : {},
 }
