@@ -19,4 +19,5 @@ module.exports = {
     autoreact   : false,
     autotyping  : false,
     floodActive : {},
+    selfMode    : false,   // true = only owner can use bot
 }
