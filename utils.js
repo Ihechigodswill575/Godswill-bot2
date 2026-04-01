@@ -17,51 +17,93 @@ function getUptime() {
     return `${sec}s`
 }
 
-// ── AI with Groq first + 3 fallbacks ─────────────────────────
+// ── Groq key rotation — never hits rate limit ─────────────────
+// HOW IT WORKS:
+//   1. Set GROQ_API_KEY in Railway (your main key)
+//   2. Optionally set GROQ_API_KEY_2, GROQ_API_KEY_3, GROQ_API_KEY_4 for more keys
+//   3. Bot rotates through all keys automatically so you NEVER hit rate limit
+//   4. If one key fails, it silently tries the next one
+//   5. If ALL Groq keys fail, it tries 3 free fallback providers
+// Get free Groq keys at: https://console.groq.com (free, takes 1 minute)
+function getGroqKeys() {
+    const keys = [
+        process.env.GROQ_API_KEY,
+        process.env.GROQ_API_KEY_2,
+        process.env.GROQ_API_KEY_3,
+        process.env.GROQ_API_KEY_4,
+    ].filter(Boolean)
+    return keys
+}
+
+// Tracks which key to use next (round-robin rotation)
+let groqKeyIndex = 0
+
+async function tryGroq(msgs) {
+    const keys = getGroqKeys()
+    if (!keys.length) return null
+
+    // Try each key starting from groqKeyIndex (round-robin)
+    for (let attempt = 0; attempt < keys.length; attempt++) {
+        const idx = (groqKeyIndex + attempt) % keys.length
+        const key = keys[idx]
+        try {
+            const r = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+                model      : 'llama3-8b-8192',
+                messages   : msgs,
+                temperature: 0.7,
+                max_tokens : 1024,
+            }, {
+                headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+                timeout: 18_000,
+            })
+            const t = r.data?.choices?.[0]?.message?.content?.trim()
+            if (t) {
+                // Move to next key for next request (rotation)
+                groqKeyIndex = (idx + 1) % keys.length
+                return t
+            }
+        } catch (e) {
+            const status = e.response?.status
+            console.log(`[AI] Groq key ${idx + 1} error: ${e.message} (status: ${status})`)
+            // On rate limit (429) or server error (500/503), try next key immediately
+            // On auth error (401/403), skip this key permanently for this request
+            continue
+        }
+    }
+    return null
+}
+
+// ── Main AI function — Groq first, 3 free fallbacks ──────────
 async function askAI(prompt, system = '') {
     const msgs = [
         ...(system ? [{ role: 'system', content: system }] : []),
         { role: 'user', content: prompt },
     ]
 
-    // Provider 1: Groq (fastest, free, most reliable — llama3-8b)
-    const GROQ_KEY = process.env.GROQ_API_KEY || ''
-    if (GROQ_KEY) {
-        try {
-            const r = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
-                model   : 'llama3-8b-8192',
-                messages: msgs,
-                temperature: 0.7,
-                max_tokens : 1024,
-            }, {
-                headers: { Authorization: `Bearer ${GROQ_KEY}`, 'Content-Type': 'application/json' },
-                timeout: 15_000,
-            })
-            const t = r.data?.choices?.[0]?.message?.content?.trim()
-            if (t) return t
-        } catch (e) { console.log('[AI] Groq error:', e.message) }
-    }
+    // ── Provider 1: Groq (MAIN — fastest, free, always first) ─
+    const groqResult = await tryGroq(msgs)
+    if (groqResult) return groqResult
 
-    // Provider 2: Pollinations POST
+    // ── Provider 2: Pollinations POST (free, no key needed) ───
     try {
         const r = await axios.post('https://text.pollinations.ai/', {
             messages: msgs, model: 'openai', seed: Math.floor(Math.random() * 9999),
         }, { timeout: 25_000 })
         const t = r.data?.choices?.[0]?.message?.content?.trim()
-        if (t) return t
+        if (t) { console.log('[AI] Used fallback: Pollinations POST'); return t }
     } catch {}
 
-    // Provider 3: Pollinations GET
+    // ── Provider 3: Pollinations GET (free, no key needed) ────
     try {
         const r = await axios.get(
             `https://text.pollinations.ai/${encodeURIComponent(system ? `${system}\n\n${prompt}` : prompt)}`,
             { timeout: 20_000, headers: { Accept: 'text/plain' } }
         )
         const t = typeof r.data === 'string' ? r.data.trim() : ''
-        if (t) return t
+        if (t) { console.log('[AI] Used fallback: Pollinations GET'); return t }
     } catch {}
 
-    // Provider 4: OpenRouter free
+    // ── Provider 4: OpenRouter free model ─────────────────────
     try {
         const r = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
             model: 'mistralai/mistral-7b-instruct:free', messages: msgs,
@@ -70,10 +112,12 @@ async function askAI(prompt, system = '') {
             timeout: 25_000,
         })
         const t = r.data?.choices?.[0]?.message?.content?.trim()
-        if (t) return t
+        if (t) { console.log('[AI] Used fallback: OpenRouter'); return t }
     } catch {}
 
-    return '❌ AI is busy right now. Try again in a moment!'
+    // ── All providers failed ───────────────────────────────────
+    console.log('[AI] All providers failed')
+    return '❌ AI is unavailable right now. Please try again in a few seconds!'
 }
 
 async function askCodeAI(prompt) {
@@ -97,21 +141,13 @@ async function createWebsite(description) {
     return html
 }
 
-// ── Image search — multi-source web search + Groq AI verification ──
-// Groq AI checks each candidate image (URL, title, source) and confirms
-// it genuinely matches the query before the bot sends it.
-// Required env vars in Railway:
-//   GROQ_API_KEY  — free at https://console.groq.com
-//   GOOGLE_CSE_KEY + GOOGLE_CSE_ID — free at https://programmablesearchengine.google.com (100/day)
+// ── Image search ──────────────────────────────────────────────
 async function searchImages(query, count = 5) {
-    const GROQ_KEY   = process.env.GROQ_API_KEY   || ''
     const GOOGLE_KEY = process.env.GOOGLE_CSE_KEY  || ''
     const GOOGLE_CX  = process.env.GOOGLE_CSE_ID   || ''
     const candidates = []
 
-    // ── Step 1: Gather candidates from real web image search sources ──
-
-    // Source A: Google Custom Search (most accurate — exact Google Image results)
+    // Source A: Google Custom Search
     if (GOOGLE_KEY && GOOGLE_CX) {
         try {
             const r = await axios.get('https://www.googleapis.com/customsearch/v1', {
@@ -124,7 +160,7 @@ async function searchImages(query, count = 5) {
         } catch (e) { console.log('[PINT] Google CSE error:', e.message) }
     }
 
-    // Source B: DuckDuckGo (no key needed, real web results)
+    // Source B: DuckDuckGo
     if (candidates.length < count * 3) {
         try {
             const vqdRes = await axios.get('https://duckduckgo.com/', {
@@ -148,7 +184,7 @@ async function searchImages(query, count = 5) {
         } catch {}
     }
 
-    // Source C: Bing scrape (great for celebs/news/people)
+    // Source C: Bing scrape
     if (candidates.length < count * 3) {
         try {
             const r = await axios.get('https://www.bing.com/images/search', {
@@ -156,11 +192,11 @@ async function searchImages(query, count = 5) {
                 headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9', Accept: 'text/html' },
                 timeout: 15_000,
             })
-            const murlMatches = [...r.data.matchAll(/murl&quot;:&quot;(https?:\/\/[^&]+)&quot;/g)]
+            const murlMatches  = [...r.data.matchAll(/murl&quot;:&quot;(https?:\/\/[^&]+)&quot;/g)]
             const titleMatches = [...r.data.matchAll(/t2&quot;:&quot;([^&"]+)&quot;/g)]
             murlMatches.forEach((m, i) => {
                 if (candidates.length >= count * 4) return
-                const url = decodeURIComponent(m[1])
+                const url   = decodeURIComponent(m[1])
                 const title = titleMatches[i] ? decodeURIComponent(titleMatches[i][1]) : ''
                 if (url.startsWith('http')) candidates.push({ url, title, source: 'bing' })
             })
@@ -169,9 +205,9 @@ async function searchImages(query, count = 5) {
 
     if (!candidates.length) return []
 
-    // ── Step 2: Groq AI verifies each candidate actually matches the query ──
-    // Groq reads the URL, title, and source and confirms the image is a real match
-    if (GROQ_KEY) {
+    // Groq AI verifies images are relevant
+    const groqKeys = getGroqKeys()
+    if (groqKeys.length) {
         try {
             const list = candidates.slice(0, 20).map((c, i) =>
                 `${i + 1}. URL: ${c.url}\n   Title: ${c.title}\n   Source: ${c.source}`
@@ -189,48 +225,36 @@ async function searchImages(query, count = 5) {
                 temperature: 0,
                 max_tokens: 100,
             }, {
-                headers: { Authorization: `Bearer ${GROQ_KEY}`, 'Content-Type': 'application/json' },
+                headers: { Authorization: `Bearer ${groqKeys[0]}`, 'Content-Type': 'application/json' },
                 timeout: 15_000,
             })
 
-            const raw = r.data?.choices?.[0]?.message?.content?.trim() || '[]'
+            const raw   = r.data?.choices?.[0]?.message?.content?.trim() || '[]'
             const match = raw.match(/\[[\d,\s]+\]/)
             if (match) {
                 const approved = JSON.parse(match[0])
                 const verified = approved.map(n => candidates[n - 1]).filter(Boolean).map(c => c.url).slice(0, count)
-                console.log(`[PINT] Groq verified ${verified.length}/${candidates.length} images for "${query}"`)
                 if (verified.length > 0) return verified
             }
         } catch (e) { console.log('[PINT] Groq verification error:', e.message) }
     }
 
-    // ── Fallback: return raw candidates if Groq key not set ──
     return candidates.slice(0, count).map(c => c.url)
 }
 
-// ── Image upscale — working free upscaler ─────────────────────
-// Uses waifu2x (free, open, no key needed, works on any image URL)
 async function upscaleImage(imageUrl) {
-    // Method 1: waifu2x-ncnn-vulkan via API proxy (best quality)
     try {
         const r = await axios.get('https://api.waifu2x.udp.jp/api', {
-            params: {
-                style: 'photo',
-                noise: 1,
-                scale: 2,
-                url: imageUrl,
-            },
+            params: { style: 'photo', noise: 1, scale: 2, url: imageUrl },
             timeout: 30_000,
             responseType: 'arraybuffer',
         })
         if (r.status === 200 && r.data?.byteLength > 1000) {
-            // Convert buffer to base64 data URL so Evolution API can send it
             const b64 = Buffer.from(r.data).toString('base64')
             return `data:image/png;base64,${b64}`
         }
     } catch {}
 
-    // Method 2: Picwish upscale API (free tier, good quality)
     try {
         const r = await axios.post('https://techzbots1-image-enhancer.hf.space/run/predict', {
             data: [imageUrl, 2]
@@ -239,17 +263,14 @@ async function upscaleImage(imageUrl) {
         if (out && out.startsWith('http')) return out
     } catch {}
 
-    // Method 3: return original with notice if all fail
     return null
 }
 
-// Legacy single-image helper
 async function searchImage(query) {
     const imgs = await searchImages(query, 1)
     return imgs[0] || null
 }
 
-// ── Reaction GIFs (nekos.best) ────────────────────────────────
 async function getReactionGif(action) {
     try {
         const r = await axios.get(`https://nekos.best/api/v2/${action}`, { timeout: 10_000 })
@@ -257,7 +278,6 @@ async function getReactionGif(action) {
     } catch { return null }
 }
 
-// ── Animal images ─────────────────────────────────────────────
 async function getCatImage() {
     try {
         const r = await axios.get('https://api.thecatapi.com/v1/images/search', { timeout: 8_000 })
@@ -272,7 +292,6 @@ async function getDogImage() {
     } catch { return null }
 }
 
-// ── Weather ───────────────────────────────────────────────────
 async function getWeather(city) {
     try {
         const r = await axios.get(`https://wttr.in/${encodeURIComponent(city)}?format=4`, { timeout: 10_000 })
@@ -280,7 +299,6 @@ async function getWeather(city) {
     } catch { return null }
 }
 
-// ── Wikipedia ─────────────────────────────────────────────────
 async function getWiki(query) {
     try {
         const r = await axios.get(
@@ -291,7 +309,6 @@ async function getWiki(query) {
     } catch { return null }
 }
 
-// ── Dictionary ────────────────────────────────────────────────
 async function getDictionary(word) {
     try {
         const r = await axios.get(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`, { timeout: 10_000 })
@@ -307,18 +324,15 @@ async function getDictionary(word) {
     } catch { return null }
 }
 
-// ── QR Code ───────────────────────────────────────────────────
 function getQRCode(text) {
     return `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(text)}`
 }
 
-// ── Password generator ────────────────────────────────────────
 function generatePassword(length = 16) {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()'
     return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
 }
 
-// ── Joke ──────────────────────────────────────────────────────
 async function getJoke() {
     try {
         const r = await axios.get('https://v2.jokeapi.dev/joke/Any?blacklistFlags=nsfw,racist&type=single', { timeout: 10_000 })
@@ -333,7 +347,6 @@ async function getDadJoke() {
     } catch { return null }
 }
 
-// ── Fun fact ──────────────────────────────────────────────────
 async function getFunFact() {
     try {
         const r = await axios.get('https://uselessfacts.jsph.pl/random.json?language=en', { timeout: 10_000 })
@@ -341,7 +354,6 @@ async function getFunFact() {
     } catch { return '🤔 The average person walks about 100,000 miles in their lifetime!' }
 }
 
-// ── Advice & Quote ────────────────────────────────────────────
 async function getAdvice() {
     try {
         const r = await axios.get('https://api.adviceslip.com/advice', { timeout: 10_000 })
@@ -356,7 +368,6 @@ async function getQuote() {
     } catch { return '"The only way to do great work is to love what you do."\n— _Steve Jobs_' }
 }
 
-// ── Meme ──────────────────────────────────────────────────────
 async function getMeme() {
     try {
         const r = await axios.get('https://meme-api.com/gimme', { timeout: 10_000 })
@@ -364,7 +375,6 @@ async function getMeme() {
     } catch { return null }
 }
 
-// ── TikTok download ───────────────────────────────────────────
 async function downloadTiktok(url) {
     try {
         const r = await axios.post('https://www.tikwm.com/api/', { url, hd: 1 }, { timeout: 20_000 })
