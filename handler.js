@@ -56,6 +56,26 @@ function chatbotAllowed(chatId) {
     return r.count <= CHATBOT_RATE_LIMIT
 }
 
+// ── Group participant cache ────────────────────────────────────
+const _groupCache = {}
+const GROUP_CACHE_TTL = 90_000 // 90 seconds
+
+async function getGroupParticipants(chatId) {
+    const now    = Date.now()
+    const cached = _groupCache[chatId]
+    if (cached && (now - cached.ts) < GROUP_CACHE_TTL) {
+        return cached.participants
+    }
+    try {
+        const info = await api.getGroupInfo(chatId)
+        const participants = info?.participants || []
+        _groupCache[chatId] = { participants, ts: now }
+        return participants
+    } catch {
+        return []
+    }
+}
+
 async function handleMessage(msg) {
     try {
         if (!msg) return
@@ -82,24 +102,28 @@ async function handleMessage(msg) {
 
         const isGroup = chatId.endsWith('@g.us')
 
-        // In groups, Evolution API sometimes sends a LID (numeric alias) instead of real number.
-        // msg.sender is the most reliable field — it is always the real phone number JID.
+        // ── SENDER RESOLUTION ─────────────────────────────────
+        // Evolution API v2 sometimes sends @lid identifiers in group messages.
+        // msg.sender is the most reliable field — it is always the real phone JID.
+        // We try multiple fields and prefer non-@lid values.
         let senderJid = ''
         if (isGroup) {
-            senderJid =
-                msg.sender           ||   // Evolution API v2 real phone JID — most reliable
-                msg.key?.participant ||
-                msg.participant      ||
-                ''
-        } else {
-            senderJid =
-                msg.sender  ||            // Evolution API v2 real phone JID
-                chatId
-        }
+            const candidates = [
+                msg.sender,
+                msg.key?.participant,
+                msg.participant,
+            ].filter(Boolean)
 
-        // If senderJid is a LID (@lid), fall back to msg.sender
-        if (senderJid.includes('@lid') && msg.sender && !msg.sender.includes('@lid')) {
-            senderJid = msg.sender
+            // prefer a non-@lid JID
+            senderJid = candidates.find(c => !c.includes('@lid')) || candidates[0] || ''
+
+            // last resort: if we only have @lid, strip it and treat as plain number
+            if (!senderJid || senderJid.includes('@lid')) {
+                const stripped = (senderJid || '').replace(/@lid/g, '@s.whatsapp.net')
+                senderJid = stripped || msg.sender || ''
+            }
+        } else {
+            senderJid = msg.sender || chatId
         }
 
         const senderNumber = cleanNumber(senderJid)
@@ -114,34 +138,32 @@ async function handleMessage(msg) {
         const isPrivileged = isOwner || isSudo
 
         // ── Check if sender is a WhatsApp group admin ─────────
+        // IMPORTANT: If the sender is an owner, we skip the group admin API call entirely.
+        // This means owner commands ALWAYS work even when Evolution API returns 400.
         let isGroupAdmin = false
         if (isGroup) {
-            const now = Date.now()
-            if (!handleMessage._groupCache) handleMessage._groupCache = {}
-            const cached = handleMessage._groupCache[chatId]
-            let participants = []
-            if (cached && (now - cached.ts) < 120_000) {
-                participants = cached.participants
+            if (isOwner) {
+                // Owner is always treated as privileged without needing group admin check
+                isGroupAdmin = false // doesn't matter — isPrivileged covers it
             } else {
-                try {
-                    const info = await api.getGroupInfo(chatId)
-                    participants = info?.participants || []
-                    handleMessage._groupCache[chatId] = { participants, ts: now }
-                } catch {
-                    // silently ignore
+                const participants = await getGroupParticipants(chatId)
+                if (participants.length > 0) {
+                    isGroupAdmin = participants.some(p => {
+                        const pNum  = cleanNumber(p.id || p.jid || '')
+                        const admin = (p.admin || p.rank || '').toLowerCase()
+                        // match by number, or suffix match for country code variations
+                        const numMatch =
+                            pNum === senderNumber ||
+                            (pNum.length >= 7 && senderNumber.endsWith(pNum)) ||
+                            (senderNumber.length >= 7 && pNum.endsWith(senderNumber))
+                        return numMatch && (
+                            p.isAdmin === true      ||
+                            p.isSuperAdmin === true ||
+                            admin === 'admin'       ||
+                            admin === 'superadmin'
+                        )
+                    })
                 }
-            }
-            if (participants.length > 0) {
-                isGroupAdmin = participants.some(p => {
-                    const num   = cleanNumber(p.id || p.jid || '')
-                    const admin = (p.admin || p.rank || '').toLowerCase()
-                    return num === senderNumber && (
-                        p.isAdmin === true      ||
-                        p.isSuperAdmin === true ||
-                        admin === 'admin'       ||
-                        admin === 'superadmin'
-                    )
-                })
             }
             console.log(`[MSG] ${senderNumber} | Owner:${isOwner} | Sudo:${isSudo} | GroupAdmin:${isGroupAdmin} | Group:${isGroup} | "${text.slice(0,60)}"`)
         } else {
@@ -163,6 +185,39 @@ async function handleMessage(msg) {
         // ── Auto typing ───────────────────────────────────────
         if (state.autotyping && text) {
             await api.sendTyping(chatId, 1).catch(() => {})
+        }
+
+        // ── Anti ghost ping ───────────────────────────────────
+        if (isGroup && state.antiGhostPing[chatId] && !isPrivileged) {
+            const isGhost = (
+                (msgContent.extendedTextMessage?.contextInfo?.mentionedJid?.length > 0 ||
+                 msgContent.extendedTextMessage?.contextInfo?.quotedMessage) &&
+                !text
+            )
+            if (isGhost) {
+                await api.deleteMessage(chatId, msgKeyId).catch(() => {})
+                await api.sendText(chatId, `👻 @${senderNumber} Ghost ping detected and removed!`)
+                return
+            }
+        }
+
+        // ── Welcome / Goodbye ─────────────────────────────────
+        if (isGroup && (msg.messageStubType === 27 || msg.messageStubType === 28)) {
+            const joined = msg.messageStubType === 27
+            if (state.welcome[chatId]?.enabled) {
+                const members = msg.messageStubParameters || []
+                for (const m of members) {
+                    const num = cleanNumber(m)
+                    if (joined) {
+                        await api.sendText(chatId,
+                            `👋 Welcome @${num} to the group!\n${state.welcome[chatId].msg || '🎉 Glad to have you here!'}`)
+                    } else {
+                        await api.sendText(chatId,
+                            `👋 @${num} has left the group.\n${state.welcome[chatId].byeMsg || '😢 We will miss you!'}`)
+                    }
+                }
+            }
+            return
         }
 
         // ── Anti link ─────────────────────────────────────────
@@ -196,6 +251,22 @@ async function handleMessage(msg) {
                 await api.sendText(chatId, `⚠️ @${senderNumber} Watch your language!`)
                 return
             }
+        }
+
+        // ── Anti delete ───────────────────────────────────────
+        if (isGroup && state.antiDelete[chatId]?.enabled && msgContent.protocolMessage?.type === 0) {
+            const origId  = msgContent.protocolMessage?.key?.id
+            const deleted = state.antiDelete[chatId]?.msgs?.[origId]
+            if (deleted) {
+                await api.sendText(chatId,
+                    `🗑️ *@${senderNumber} deleted a message:*\n\n${deleted}`)
+            }
+            return
+        }
+        // Store message for antidelete
+        if (isGroup && state.antiDelete[chatId]?.enabled && text && msgKeyId) {
+            if (!state.antiDelete[chatId].msgs) state.antiDelete[chatId].msgs = {}
+            state.antiDelete[chatId].msgs[msgKeyId] = text.slice(0, 500)
         }
 
         // ── Name trigger ──────────────────────────────────────
