@@ -531,7 +531,7 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
 
     // ── GROUP COMMANDS ────────────────────────────────────────
     if (cmd === `${PREFIX}tagall` && isGroup) {
-        if (!isPrivileged) return api.sendText(chatId, `❌ Admins only!`, qid)
+        if (!isOwner && !isSudo) return api.sendText(chatId, `❌ Owner only!`, qid)
         const info = await api.getGroupInfo(chatId)
         if (!info) return api.sendText(chatId, `❌ Could not get group info!`, qid)
         const tags = info.participants?.map(p => `@${p.id.split('@')[0]}`).join(' ') || ''
