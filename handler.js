@@ -99,14 +99,32 @@ async function handleMessage(msg) {
         const isPrivileged = isOwner || isSudo
 
         // ── Check if sender is a WhatsApp group admin ─────────
+        // Evolution API includes participant admin status in the message payload itself
+        // so we don't need a separate API call that causes 400 errors
         let isGroupAdmin = false
         if (isGroup) {
-            try {
-                const groupInfo = await api.getGroupInfo(chatId)
-                isGroupAdmin = groupInfo?.participants?.some(
-                    p => cleanNumber(p.id) === senderNumber && p.rank === 'admin'
-                ) || false
-            } catch {}
+            // Method 1: check groupMetadata in the message (Evolution API v2 includes this)
+            const participants = msg?.groupMetadata?.participants || msg?.participant_list || []
+            if (participants.length > 0) {
+                isGroupAdmin = participants.some(p => {
+                    const num = cleanNumber(p.id || p.jid || '')
+                    return num === senderNumber && (p.isAdmin || p.isSuperAdmin || p.rank === 'admin' || p.admin === 'admin' || p.admin === 'superadmin')
+                })
+            }
+
+            // Method 2: fallback — try getGroupInfo but don't block if it fails
+            if (!isGroupAdmin) {
+                try {
+                    const groupInfo = await api.getGroupInfo(chatId)
+                    if (groupInfo?.participants?.length > 0) {
+                        isGroupAdmin = groupInfo.participants.some(p => {
+                            const num = cleanNumber(p.id || '')
+                            return num === senderNumber && (p.rank === 'admin' || p.admin === 'admin' || p.admin === 'superadmin')
+                        })
+                    }
+                } catch {}
+            }
+
             console.log(`[MSG] ${senderNumber} | Owner:${isOwner} | Sudo:${isSudo} | GroupAdmin:${isGroupAdmin} | Group:${isGroup} | "${text.slice(0,60)}"`)
         } else {
             console.log(`[MSG] ${senderNumber} | Owner:${isOwner} | Sudo:${isSudo} | Group:${isGroup} | "${text.slice(0,60)}"`)
