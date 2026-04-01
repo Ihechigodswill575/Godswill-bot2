@@ -90,14 +90,10 @@ async function sendTyping(chatId, seconds = 2) {
 }
 
 async function getGroupInfo(groupId) {
-    const jid      = groupId.includes('@') ? groupId : `${groupId}@g.us`
-    const jidClean = jid.replace('@g.us', '')
-    // Evolution API v2: %40 encoded JID
-    let res = await request('get', `/group/findGroupInfos/${EVO_INSTANCE}?groupJid=${jidClean}%40g.us`)
-    if (res?.id || res?.participants) return res
-    // Fallback literal @
-    res = await request('get', `/group/findGroupInfos/${EVO_INSTANCE}?groupJid=${jid}`)
-    if (res?.id || res?.participants) return res
+    // Official Evolution API v2 endpoint: GET /group/participants/{instance}?groupJid=xxx@g.us
+    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`
+    const res = await request('get', `/group/participants/${EVO_INSTANCE}?groupJid=${encodeURIComponent(jid)}`)
+    if (res?.participants) return res
     return null
 }
 
