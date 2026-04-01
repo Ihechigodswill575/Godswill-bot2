@@ -144,8 +144,8 @@ _💡 Say *tavik* anytime to wake me!_`
     )
 }
 
-async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup, msg) {
-    const isPrivileged = isOwner || isSudo
+async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup, msg, isGroupAdmin = false) {
+    const isPrivileged = isOwner || isSudo || isGroupAdmin
     const args  = text.trim().split(/\s+/)
     const cmd   = args[0].toLowerCase()
     const query = args.slice(1).join(' ')
@@ -366,19 +366,10 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
         if (!imageUrl) return api.sendText(chatId,
             `❌ Usage: *${PREFIX}upscale <image_url>*\n\nExample:\n${PREFIX}upscale https://example.com/img.jpg`, qid)
         await api.sendTyping(chatId, 3)
-        await api.sendText(chatId, `🔍 Upscaling...`, qid)
-        try {
-            const axios = require('axios')
-            const r = await axios.post('https://api.deepai.org/api/torch-srgan',
-                `image=${encodeURIComponent(imageUrl)}`,
-                {
-                    headers: { 'api-key': 'quickstart-QUdJIGlzIGZ1bg', 'Content-Type': 'application/x-www-form-urlencoded' },
-                    timeout: 30_000,
-                })
-            const outUrl = r.data?.output_url
-            if (outUrl) return api.sendImage(chatId, outUrl, `✅ *Upscaled!*`, qid)
-        } catch {}
-        return api.sendText(chatId, `❌ Upscale failed. The API may be rate limited. Try again later!`, qid)
+        await api.sendText(chatId, `🔍 Upscaling image... please wait ⏳`, qid)
+        const outUrl = await utils.upscaleImage(imageUrl)
+        if (outUrl) return api.sendImage(chatId, outUrl, `✅ *Upscaled (2x)!*`, qid)
+        return api.sendText(chatId, `❌ Upscale failed. Make sure the URL is a direct image link (jpg/png).`, qid)
     }
 
     if (cmd === `${PREFIX}del` && isPrivileged) {
