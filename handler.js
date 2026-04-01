@@ -19,15 +19,22 @@ function checkIsOwner(senderRaw) {
     const sender = cleanNumber(senderRaw)
     if (!sender || sender.length < 5) return false
 
-    console.log(`[OWNER CHECK] sender="${sender}" against owners=[${OWNER_NUMBERS.map(cleanNumber).join(', ')}]`)
+    console.log(`[OWNER CHECK] sender="${sender}" against owners=[${OWNER_NUMBERS.join(', ')}]`)
 
     return OWNER_NUMBERS.some(ownerRaw => {
         const owner = cleanNumber(ownerRaw)
         if (!owner) return false
+
+        // Exact match
         if (sender === owner) return true
-        // Suffix match handles country-code variations
+
+        // Suffix match — handles country code variations
+        // e.g. 08145688688 vs 2348145688688 — last 10 digits match
+        const minLen = Math.min(sender.length, owner.length)
+        if (minLen >= 8 && sender.slice(-minLen) === owner.slice(-minLen)) return true
         if (sender.length >= 7 && owner.endsWith(sender)) return true
         if (owner.length  >= 7 && sender.endsWith(owner)) return true
+
         return false
     })
 }
@@ -75,8 +82,8 @@ async function handleMessage(msg) {
 
         const isGroup = chatId.endsWith('@g.us')
 
-        // In groups, Evolution API sometimes sends a LID (numeric alias) instead of the real number.
-        // msg.sender is the most reliable field — it's always the real phone number JID.
+        // In groups, Evolution API sometimes sends a LID (numeric alias) instead of real number.
+        // msg.sender is the most reliable field — it is always the real phone number JID.
         let senderJid = ''
         if (isGroup) {
             senderJid =
@@ -90,7 +97,7 @@ async function handleMessage(msg) {
                 chatId
         }
 
-        // If senderJid is a LID (@lid), also try msg.sender as fallback
+        // If senderJid is a LID (@lid), fall back to msg.sender
         if (senderJid.includes('@lid') && msg.sender && !msg.sender.includes('@lid')) {
             senderJid = msg.sender
         }
@@ -107,7 +114,6 @@ async function handleMessage(msg) {
         const isPrivileged = isOwner || isSudo
 
         // ── Check if sender is a WhatsApp group admin ─────────
-        // Cache group info for 2 minutes to avoid spamming Evolution API on every message
         let isGroupAdmin = false
         if (isGroup) {
             const now = Date.now()
@@ -219,7 +225,7 @@ async function handleMessage(msg) {
             return
         }
 
-        // ── Chatbot ───────────────────────────────────────────
+        // ── Chatbot (Groq-powered) ────────────────────────────
         if (state.chatbot[chatId] && text && !text.startsWith(PREFIX)) {
             if (!chatbotAllowed(chatId)) {
                 console.log(`[CHATBOT] Rate limited: ${chatId}`)
