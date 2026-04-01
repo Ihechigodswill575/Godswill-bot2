@@ -75,16 +75,24 @@ async function handleMessage(msg) {
 
         const isGroup = chatId.endsWith('@g.us')
 
-        // In groups the real sender is in participant — NOT remoteJid (which is the group JID)
+        // In groups, Evolution API sometimes sends a LID (numeric alias) instead of the real number.
+        // msg.sender is the most reliable field — it's always the real phone number JID.
         let senderJid = ''
         if (isGroup) {
             senderJid =
+                msg.sender           ||   // Evolution API v2 real phone JID — most reliable
                 msg.key?.participant ||
                 msg.participant      ||
                 ''
         } else {
-            // DM: remoteJid IS the sender
-            senderJid = chatId
+            senderJid =
+                msg.sender  ||            // Evolution API v2 real phone JID
+                chatId
+        }
+
+        // If senderJid is a LID (@lid), also try msg.sender as fallback
+        if (senderJid.includes('@lid') && msg.sender && !msg.sender.includes('@lid')) {
+            senderJid = msg.sender
         }
 
         const senderNumber = cleanNumber(senderJid)
