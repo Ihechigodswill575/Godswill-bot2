@@ -80,78 +80,110 @@ async function createWebsite(description) {
     return html
 }
 
-// ── Image search — 5 results from multiple free sources ───────
-// Sources: DuckDuckGo images, Pixabay, Pexels (no key needed paths), Lorem Picsum seeds
+// ── Image search — exact results via Google scrape + Bing fallback ──
+// This is how real bots do it: scrape Google Images HTML for thumbnail URLs,
+// then fall back to Bing Image Search API (free, no key needed for basic use)
 async function searchImages(query, count = 5) {
     const results = []
 
-    // Source 1: DuckDuckGo image search (scrape the vqd token + results)
+    // Source 1: Google Images scrape (most accurate — same results as googling)
     try {
-        const vqdRes = await axios.get(`https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`, {
-            headers: { 'User-Agent': UA }, timeout: 10_000,
+        const r = await axios.get('https://www.google.com/search', {
+            params: { q: query, tbm: 'isch', hl: 'en', safe: 'off', num: '20' },
+            headers: {
+                'User-Agent'      : UA,
+                'Accept-Language' : 'en-US,en;q=0.9',
+                'Accept'          : 'text/html',
+                'Referer'         : 'https://www.google.com/',
+            },
+            timeout: 15_000,
         })
-        const vqdMatch = vqdRes.data.match(/vqd=['"]([^'"]+)['"]/)
-        if (vqdMatch) {
-            const imgRes = await axios.get('https://duckduckgo.com/i.js', {
-                params: { q: query, o: 'json', vqd: vqdMatch[1], f: ',,,,,', p: '1' },
-                headers: { 'User-Agent': UA, Referer: 'https://duckduckgo.com/' },
-                timeout: 12_000,
-            })
-            const imgs = imgRes.data?.results || []
-            for (const img of imgs.slice(0, 10)) {
-                if (results.length >= count) break
-                if (img?.image && img.image.startsWith('http')) results.push(img.image)
-            }
+        // Extract full-size image URLs from AF_initDataCallback JSON blobs
+        const matches = [...r.data.matchAll(/"(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp))"/gi)]
+        for (const m of matches) {
+            if (results.length >= count) break
+            const url = m[1]
+            // Skip Google's own tiny icons and tracking URLs
+            if (url.includes('gstatic') || url.includes('google.com') || url.length < 30) continue
+            if (!results.includes(url)) results.push(url)
         }
     } catch {}
 
-    // Source 2: Pixabay free (no key for low-res)
+    // Source 2: Bing Image Search scrape (excellent for people/celebs/sports)
+    if (results.length < count) {
+        try {
+            const r = await axios.get('https://www.bing.com/images/search', {
+                params: { q: query, form: 'HDRSC2', first: '1', count: '20' },
+                headers: {
+                    'User-Agent'      : UA,
+                    'Accept-Language' : 'en-US,en;q=0.9',
+                    'Accept'          : 'text/html',
+                    'Referer'         : 'https://www.bing.com/',
+                },
+                timeout: 15_000,
+            })
+            // Bing stores image URLs in murl:"..." fields
+            const murlMatches = [...r.data.matchAll(/murl&quot;:&quot;(https?:\/\/[^&]+)&quot;/g)]
+            for (const m of murlMatches) {
+                if (results.length >= count) break
+                const url = decodeURIComponent(m[1])
+                if (!results.includes(url)) results.push(url)
+            }
+            // Also try the iurl pattern
+            if (results.length < count) {
+                const iurlMatches = [...r.data.matchAll(/"murl":"(https?:\/\/[^"]+)"/g)]
+                for (const m of iurlMatches) {
+                    if (results.length >= count) break
+                    const url = m[1]
+                    if (!results.includes(url)) results.push(url)
+                }
+            }
+        } catch {}
+    }
+
+    // Source 3: DuckDuckGo image search (reliable fallback)
+    if (results.length < count) {
+        try {
+            const vqdRes = await axios.get(`https://duckduckgo.com/`, {
+                params: { q: query, iax: 'images', ia: 'images' },
+                headers: { 'User-Agent': UA },
+                timeout: 10_000,
+            })
+            const vqdMatch = vqdRes.data.match(/vqd=['"]([^'"]+)['"]/)
+            if (vqdMatch) {
+                const imgRes = await axios.get('https://duckduckgo.com/i.js', {
+                    params: { q: query, o: 'json', vqd: vqdMatch[1], f: ',,,,,', p: '1' },
+                    headers: { 'User-Agent': UA, Referer: 'https://duckduckgo.com/' },
+                    timeout: 12_000,
+                })
+                const imgs = imgRes.data?.results || []
+                for (const img of imgs) {
+                    if (results.length >= count) break
+                    if (img?.image && img.image.startsWith('http') && !results.includes(img.image))
+                        results.push(img.image)
+                }
+            }
+        } catch {}
+    }
+
+    // Source 4: Pixabay (good for nature/objects, weak for people)
     if (results.length < count) {
         try {
             const r = await axios.get('https://pixabay.com/api/', {
-                params: {
-                    key: '44268846-e08c3b90e3c1af79e7882ee6e',
-                    q: query, image_type: 'photo', per_page: 10, safesearch: 'true',
-                },
+                params: { key: '44268846-e08c3b90e3c1af79e7882ee6e', q: query, image_type: 'photo', per_page: 10 },
                 timeout: 10_000,
             })
-            const hits = r.data?.hits || []
-            for (const h of hits) {
+            for (const h of r.data?.hits || []) {
                 if (results.length >= count) break
-                if (h.webformatURL) results.push(h.webformatURL)
+                if (h.webformatURL && !results.includes(h.webformatURL)) results.push(h.webformatURL)
             }
         } catch {}
     }
 
-    // Source 3: Pexels (free public API key for non-commercial)
-    if (results.length < count) {
-        try {
-            const r = await axios.get('https://api.pexels.com/v1/search', {
-                params: { query, per_page: 10 },
-                headers: { Authorization: 'yVOSmRzuA6VTBB1RKpnFaMKhHkmxSqlVDv3KnSHxIriuyCXQjJbCMbOe' },
-                timeout: 10_000,
-            })
-            const photos = r.data?.photos || []
-            for (const p of photos) {
-                if (results.length >= count) break
-                if (p?.src?.medium) results.push(p.src.medium)
-            }
-        } catch {}
-    }
-
-    // Source 4: Seeded Picsum fallback (always works)
-    if (results.length < count) {
-        const seed = query.split('').reduce((a, c) => a + c.charCodeAt(0), 0)
-        while (results.length < count) {
-            results.push(`https://picsum.photos/seed/${seed + results.length}/800/600`)
-        }
-    }
-
-    // Deduplicate
-    return [...new Set(results)].slice(0, count)
+    return results.slice(0, count)
 }
 
-// Legacy single-image helper used by .pint
+// Legacy single-image helper
 async function searchImage(query) {
     const imgs = await searchImages(query, 1)
     return imgs[0] || null
