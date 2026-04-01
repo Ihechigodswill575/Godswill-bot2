@@ -90,22 +90,14 @@ async function sendTyping(chatId, seconds = 2) {
 }
 
 async function getGroupInfo(groupId) {
-    // Evolution API v2: groupJid must be passed as query param without the @g.us suffix sometimes
-    // Try multiple formats until one works
-    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`
-
-    // Format 1: standard query param
-    let res = await request('get', `/group/findGroupInfos/${EVO_INSTANCE}?groupJid=${encodeURIComponent(jid)}`)
-    if (res) return res
-
-    // Format 2: without encoding
+    const jid      = groupId.includes('@') ? groupId : `${groupId}@g.us`
+    const jidClean = jid.replace('@g.us', '')
+    // Evolution API v2: %40 encoded JID
+    let res = await request('get', `/group/findGroupInfos/${EVO_INSTANCE}?groupJid=${jidClean}%40g.us`)
+    if (res?.id || res?.participants) return res
+    // Fallback literal @
     res = await request('get', `/group/findGroupInfos/${EVO_INSTANCE}?groupJid=${jid}`)
-    if (res) return res
-
-    // Format 3: as POST body (some Evolution API versions)
-    res = await request('post', `/group/findGroupInfos/${EVO_INSTANCE}`, { groupJid: jid })
-    if (res) return res
-
+    if (res?.id || res?.participants) return res
     return null
 }
 
