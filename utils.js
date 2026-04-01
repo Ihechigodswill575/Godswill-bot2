@@ -17,14 +17,32 @@ function getUptime() {
     return `${sec}s`
 }
 
-// ── AI with 3 fallbacks ───────────────────────────────────────
+// ── AI with Groq first + 3 fallbacks ─────────────────────────
 async function askAI(prompt, system = '') {
     const msgs = [
         ...(system ? [{ role: 'system', content: system }] : []),
         { role: 'user', content: prompt },
     ]
 
-    // Provider 1: Pollinations POST
+    // Provider 1: Groq (fastest, free, most reliable — llama3-8b)
+    const GROQ_KEY = process.env.GROQ_API_KEY || ''
+    if (GROQ_KEY) {
+        try {
+            const r = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+                model   : 'llama3-8b-8192',
+                messages: msgs,
+                temperature: 0.7,
+                max_tokens : 1024,
+            }, {
+                headers: { Authorization: `Bearer ${GROQ_KEY}`, 'Content-Type': 'application/json' },
+                timeout: 15_000,
+            })
+            const t = r.data?.choices?.[0]?.message?.content?.trim()
+            if (t) return t
+        } catch (e) { console.log('[AI] Groq error:', e.message) }
+    }
+
+    // Provider 2: Pollinations POST
     try {
         const r = await axios.post('https://text.pollinations.ai/', {
             messages: msgs, model: 'openai', seed: Math.floor(Math.random() * 9999),
@@ -33,7 +51,7 @@ async function askAI(prompt, system = '') {
         if (t) return t
     } catch {}
 
-    // Provider 2: Pollinations GET
+    // Provider 3: Pollinations GET
     try {
         const r = await axios.get(
             `https://text.pollinations.ai/${encodeURIComponent(system ? `${system}\n\n${prompt}` : prompt)}`,
@@ -43,7 +61,7 @@ async function askAI(prompt, system = '') {
         if (t) return t
     } catch {}
 
-    // Provider 3: OpenRouter free
+    // Provider 4: OpenRouter free
     try {
         const r = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
             model: 'mistralai/mistral-7b-instruct:free', messages: msgs,
@@ -75,76 +93,41 @@ async function createWebsite(description) {
         'Return ONLY raw HTML. No markdown. No backticks. No explanation. Just the HTML file.',
     ].join('\n')
     const html = await askAI(description, system)
-    // Validate it looks like HTML
     if (!html || !html.trim().toLowerCase().startsWith('<!')) return null
     return html
 }
 
-// ── Image search — exact results via Google scrape + Bing fallback ──
-// This is how real bots do it: scrape Google Images HTML for thumbnail URLs,
-// then fall back to Bing Image Search API (free, no key needed for basic use)
+// ── Image search — multi-source web search + Groq AI verification ──
+// Groq AI checks each candidate image (URL, title, source) and confirms
+// it genuinely matches the query before the bot sends it.
+// Required env vars in Railway:
+//   GROQ_API_KEY  — free at https://console.groq.com
+//   GOOGLE_CSE_KEY + GOOGLE_CSE_ID — free at https://programmablesearchengine.google.com (100/day)
 async function searchImages(query, count = 5) {
-    const results = []
+    const GROQ_KEY   = process.env.GROQ_API_KEY   || ''
+    const GOOGLE_KEY = process.env.GOOGLE_CSE_KEY  || ''
+    const GOOGLE_CX  = process.env.GOOGLE_CSE_ID   || ''
+    const candidates = []
 
-    // Source 1: Google Images scrape (most accurate — same results as googling)
-    try {
-        const r = await axios.get('https://www.google.com/search', {
-            params: { q: query, tbm: 'isch', hl: 'en', safe: 'off', num: '20' },
-            headers: {
-                'User-Agent'      : UA,
-                'Accept-Language' : 'en-US,en;q=0.9',
-                'Accept'          : 'text/html',
-                'Referer'         : 'https://www.google.com/',
-            },
-            timeout: 15_000,
-        })
-        // Extract full-size image URLs from AF_initDataCallback JSON blobs
-        const matches = [...r.data.matchAll(/"(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp))"/gi)]
-        for (const m of matches) {
-            if (results.length >= count) break
-            const url = m[1]
-            // Skip Google's own tiny icons and tracking URLs
-            if (url.includes('gstatic') || url.includes('google.com') || url.length < 30) continue
-            if (!results.includes(url)) results.push(url)
-        }
-    } catch {}
+    // ── Step 1: Gather candidates from real web image search sources ──
 
-    // Source 2: Bing Image Search scrape (excellent for people/celebs/sports)
-    if (results.length < count) {
+    // Source A: Google Custom Search (most accurate — exact Google Image results)
+    if (GOOGLE_KEY && GOOGLE_CX) {
         try {
-            const r = await axios.get('https://www.bing.com/images/search', {
-                params: { q: query, form: 'HDRSC2', first: '1', count: '20' },
-                headers: {
-                    'User-Agent'      : UA,
-                    'Accept-Language' : 'en-US,en;q=0.9',
-                    'Accept'          : 'text/html',
-                    'Referer'         : 'https://www.bing.com/',
-                },
+            const r = await axios.get('https://www.googleapis.com/customsearch/v1', {
+                params: { key: GOOGLE_KEY, cx: GOOGLE_CX, q: query, searchType: 'image', num: 10, safe: 'active' },
                 timeout: 15_000,
             })
-            // Bing stores image URLs in murl:"..." fields
-            const murlMatches = [...r.data.matchAll(/murl&quot;:&quot;(https?:\/\/[^&]+)&quot;/g)]
-            for (const m of murlMatches) {
-                if (results.length >= count) break
-                const url = decodeURIComponent(m[1])
-                if (!results.includes(url)) results.push(url)
+            for (const item of r.data?.items || []) {
+                candidates.push({ url: item.link, title: item.title || '', source: item.displayLink || '' })
             }
-            // Also try the iurl pattern
-            if (results.length < count) {
-                const iurlMatches = [...r.data.matchAll(/"murl":"(https?:\/\/[^"]+)"/g)]
-                for (const m of iurlMatches) {
-                    if (results.length >= count) break
-                    const url = m[1]
-                    if (!results.includes(url)) results.push(url)
-                }
-            }
-        } catch {}
+        } catch (e) { console.log('[PINT] Google CSE error:', e.message) }
     }
 
-    // Source 3: DuckDuckGo image search (reliable fallback)
-    if (results.length < count) {
+    // Source B: DuckDuckGo (no key needed, real web results)
+    if (candidates.length < count * 3) {
         try {
-            const vqdRes = await axios.get(`https://duckduckgo.com/`, {
+            const vqdRes = await axios.get('https://duckduckgo.com/', {
                 params: { q: query, iax: 'images', ia: 'images' },
                 headers: { 'User-Agent': UA },
                 timeout: 10_000,
@@ -156,31 +139,108 @@ async function searchImages(query, count = 5) {
                     headers: { 'User-Agent': UA, Referer: 'https://duckduckgo.com/' },
                     timeout: 12_000,
                 })
-                const imgs = imgRes.data?.results || []
-                for (const img of imgs) {
-                    if (results.length >= count) break
-                    if (img?.image && img.image.startsWith('http') && !results.includes(img.image))
-                        results.push(img.image)
+                for (const img of imgRes.data?.results || []) {
+                    if (candidates.length >= count * 4) break
+                    if (img?.image && img.image.startsWith('http'))
+                        candidates.push({ url: img.image, title: img.title || '', source: img.url || '' })
                 }
             }
         } catch {}
     }
 
-    // Source 4: Pixabay (good for nature/objects, weak for people)
-    if (results.length < count) {
+    // Source C: Bing scrape (great for celebs/news/people)
+    if (candidates.length < count * 3) {
         try {
-            const r = await axios.get('https://pixabay.com/api/', {
-                params: { key: '44268846-e08c3b90e3c1af79e7882ee6e', q: query, image_type: 'photo', per_page: 10 },
-                timeout: 10_000,
+            const r = await axios.get('https://www.bing.com/images/search', {
+                params: { q: query, form: 'HDRSC2', first: '1', count: '20' },
+                headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9', Accept: 'text/html' },
+                timeout: 15_000,
             })
-            for (const h of r.data?.hits || []) {
-                if (results.length >= count) break
-                if (h.webformatURL && !results.includes(h.webformatURL)) results.push(h.webformatURL)
-            }
+            const murlMatches = [...r.data.matchAll(/murl&quot;:&quot;(https?:\/\/[^&]+)&quot;/g)]
+            const titleMatches = [...r.data.matchAll(/t2&quot;:&quot;([^&"]+)&quot;/g)]
+            murlMatches.forEach((m, i) => {
+                if (candidates.length >= count * 4) return
+                const url = decodeURIComponent(m[1])
+                const title = titleMatches[i] ? decodeURIComponent(titleMatches[i][1]) : ''
+                if (url.startsWith('http')) candidates.push({ url, title, source: 'bing' })
+            })
         } catch {}
     }
 
-    return results.slice(0, count)
+    if (!candidates.length) return []
+
+    // ── Step 2: Groq AI verifies each candidate actually matches the query ──
+    // Groq reads the URL, title, and source and confirms the image is a real match
+    if (GROQ_KEY) {
+        try {
+            const list = candidates.slice(0, 20).map((c, i) =>
+                `${i + 1}. URL: ${c.url}\n   Title: ${c.title}\n   Source: ${c.source}`
+            ).join('\n\n')
+
+            const r = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+                model: 'llama3-8b-8192',
+                messages: [{
+                    role: 'system',
+                    content: 'You are a strict image relevance checker. Given a search query and image candidates (URL, title, source domain), return ONLY the index numbers of images that are clearly and accurately about the query. Reject anything vague, unrelated, or generic. Return a JSON array of numbers only like [1,3,5]. No explanation.',
+                }, {
+                    role: 'user',
+                    content: `Search query: "${query}"\n\nCandidates:\n${list}`,
+                }],
+                temperature: 0,
+                max_tokens: 100,
+            }, {
+                headers: { Authorization: `Bearer ${GROQ_KEY}`, 'Content-Type': 'application/json' },
+                timeout: 15_000,
+            })
+
+            const raw = r.data?.choices?.[0]?.message?.content?.trim() || '[]'
+            const match = raw.match(/\[[\d,\s]+\]/)
+            if (match) {
+                const approved = JSON.parse(match[0])
+                const verified = approved.map(n => candidates[n - 1]).filter(Boolean).map(c => c.url).slice(0, count)
+                console.log(`[PINT] Groq verified ${verified.length}/${candidates.length} images for "${query}"`)
+                if (verified.length > 0) return verified
+            }
+        } catch (e) { console.log('[PINT] Groq verification error:', e.message) }
+    }
+
+    // ── Fallback: return raw candidates if Groq key not set ──
+    return candidates.slice(0, count).map(c => c.url)
+}
+
+// ── Image upscale — working free upscaler ─────────────────────
+// Uses waifu2x (free, open, no key needed, works on any image URL)
+async function upscaleImage(imageUrl) {
+    // Method 1: waifu2x-ncnn-vulkan via API proxy (best quality)
+    try {
+        const r = await axios.get('https://api.waifu2x.udp.jp/api', {
+            params: {
+                style: 'photo',
+                noise: 1,
+                scale: 2,
+                url: imageUrl,
+            },
+            timeout: 30_000,
+            responseType: 'arraybuffer',
+        })
+        if (r.status === 200 && r.data?.byteLength > 1000) {
+            // Convert buffer to base64 data URL so Evolution API can send it
+            const b64 = Buffer.from(r.data).toString('base64')
+            return `data:image/png;base64,${b64}`
+        }
+    } catch {}
+
+    // Method 2: Picwish upscale API (free tier, good quality)
+    try {
+        const r = await axios.post('https://techzbots1-image-enhancer.hf.space/run/predict', {
+            data: [imageUrl, 2]
+        }, { timeout: 40_000 })
+        const out = r.data?.data?.[0]
+        if (out && out.startsWith('http')) return out
+    } catch {}
+
+    // Method 3: return original with notice if all fail
+    return null
 }
 
 // Legacy single-image helper
@@ -323,7 +383,7 @@ async function downloadTiktok(url) {
 
 module.exports = {
     getUptime, askAI, askCodeAI, createWebsite,
-    searchImage, searchImages,
+    searchImage, searchImages, upscaleImage,
     getReactionGif, getCatImage, getDogImage,
     getWeather, getWiki, getDictionary, getQRCode,
     generatePassword, getJoke, getDadJoke, getFunFact,
