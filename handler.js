@@ -76,7 +76,6 @@ async function handleMessage(msg) {
         const isGroup = chatId.endsWith('@g.us')
 
         // In groups the real sender is in participant — NOT remoteJid (which is the group JID)
-        // Evolution API may populate it in slightly different spots
         let senderJid = ''
         if (isGroup) {
             senderJid =
@@ -99,7 +98,19 @@ async function handleMessage(msg) {
         const isSudo       = state.sudoUsers.includes(senderNumber)
         const isPrivileged = isOwner || isSudo
 
-        console.log(`[MSG] ${senderNumber} | Owner:${isOwner} | Sudo:${isSudo} | Group:${isGroup} | "${text.slice(0,60)}"`)
+        // ── Check if sender is a WhatsApp group admin ─────────
+        let isGroupAdmin = false
+        if (isGroup) {
+            try {
+                const groupInfo = await api.getGroupInfo(chatId)
+                isGroupAdmin = groupInfo?.participants?.some(
+                    p => cleanNumber(p.id) === senderNumber && p.rank === 'admin'
+                ) || false
+            } catch {}
+            console.log(`[MSG] ${senderNumber} | Owner:${isOwner} | Sudo:${isSudo} | GroupAdmin:${isGroupAdmin} | Group:${isGroup} | "${text.slice(0,60)}"`)
+        } else {
+            console.log(`[MSG] ${senderNumber} | Owner:${isOwner} | Sudo:${isSudo} | Group:${isGroup} | "${text.slice(0,60)}"`)
+        }
 
         // ── Self mode ─────────────────────────────────────────
         if (state.selfMode && !isOwner) return
@@ -194,8 +205,8 @@ async function handleMessage(msg) {
         // ── Commands ──────────────────────────────────────────
         if (!text || !text.startsWith(PREFIX)) return
 
-        console.log(`[CMD] Owner:${isOwner} Sudo:${isSudo} | ${senderNumber} → ${text}`)
-        await handleCommand(chatId, senderNumber, text, msgKeyId, isOwner, isSudo, isGroup, msg)
+        console.log(`[CMD] Owner:${isOwner} Sudo:${isSudo} GroupAdmin:${isGroupAdmin} | ${senderNumber} → ${text}`)
+        await handleCommand(chatId, senderNumber, text, msgKeyId, isOwner, isSudo, isGroup, msg, isGroupAdmin)
 
     } catch (err) {
         console.error('[HANDLER ERROR]', err.message)
