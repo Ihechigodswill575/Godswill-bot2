@@ -9,10 +9,7 @@ const utils  = require('./utils')
 const pick = arr => arr[Math.floor(Math.random() * arr.length)]
 
 function cleanNumber(jid = '') {
-    return jid
-        .replace(/@s\.whatsapp\.net|@g\.us/g, '')
-        .replace(/[^0-9]/g, '')
-        .replace(/^0+/, '')
+    return jid.replace(/@s\.whatsapp\.net|@g\.us/g, '').replace(/[^0-9]/g, '').replace(/^0+/, '')
 }
 
 function checkIsOwner(senderNumber) {
@@ -23,7 +20,7 @@ function checkIsOwner(senderNumber) {
         if (!owner) return false
         if (sender === owner) return true
         if (sender.length > 6 && owner.endsWith(sender)) return true
-        if (owner.length  > 6 && sender.endsWith(owner))  return true
+        if (owner.length  > 6 && sender.endsWith(owner)) return true
         return false
     })
 }
@@ -41,11 +38,11 @@ async function handleMessage(msg) {
         if (msgContent.pollUpdateMessage)            return
 
         const text = (
-            msgContent.conversation                  ||
-            msgContent.extendedTextMessage?.text     ||
-            msgContent.imageMessage?.caption         ||
-            msgContent.videoMessage?.caption         ||
-            msgContent.documentMessage?.caption      ||
+            msgContent.conversation                 ||
+            msgContent.extendedTextMessage?.text    ||
+            msgContent.imageMessage?.caption        ||
+            msgContent.videoMessage?.caption        ||
+            msgContent.documentMessage?.caption     ||
             ''
         ).trim()
 
@@ -64,7 +61,8 @@ async function handleMessage(msg) {
 
         console.log(`[MSG] ${senderNumber} | Owner:${isOwner} | Sudo:${isSudo} | Group:${isGroup} | "${text}"`)
 
-        // ── Self mode ─────────────────────────────────────────
+        // ── Self mode: works in BOTH DMs and groups ───────────
+        // Owners always pass through, everyone else is blocked
         if (state.selfMode && !isOwner) return
 
         // ── Auto read ─────────────────────────────────────────
@@ -72,9 +70,8 @@ async function handleMessage(msg) {
 
         // ── Auto react ────────────────────────────────────────
         if (state.autoreact && text && msgKeyId) {
-            const emojis = ['❤️', '😂', '🔥', '⚡', '👍', '🎉']
-            await api.sendReaction(chatId, msgKeyId,
-                emojis[Math.floor(Math.random() * emojis.length)]).catch(() => {})
+            const emojis = ['❤️', '😂', '🔥', '⚡', '👍', '🎉', '😍', '🤩']
+            await api.sendReaction(chatId, msgKeyId, emojis[Math.floor(Math.random() * emojis.length)]).catch(() => {})
         }
 
         // ── Auto typing ───────────────────────────────────────
@@ -86,7 +83,7 @@ async function handleMessage(msg) {
         if (isGroup && state.antilink[chatId] && !isPrivileged) {
             if (/(https?:\/\/|wa\.me\/|chat\.whatsapp\.com)/i.test(text)) {
                 await api.deleteMessage(chatId, msgKeyId).catch(() => {})
-                await api.sendText(chatId, `⚠️ @${senderNumber} Links are not allowed here!`)
+                await api.sendText(chatId, `⚠️ @${senderNumber} Links are not allowed!`)
                 return
             }
         }
@@ -101,7 +98,7 @@ async function handleMessage(msg) {
             state.spamCount[key].count++
             if (state.spamCount[key].count > 5) {
                 await api.removeGroupParticipants(chatId, [`${senderNumber}@s.whatsapp.net`]).catch(() => {})
-                await api.sendText(chatId, `🚫 @${senderNumber} was kicked for spamming!`)
+                await api.sendText(chatId, `🚫 @${senderNumber} kicked for spamming!`)
                 return
             }
         }
@@ -115,19 +112,21 @@ async function handleMessage(msg) {
             }
         }
 
-        // ── Name trigger: someone says "tavik" ────────────────
-        const lowerText = text.toLowerCase().trim()
-        if (!text.startsWith(PREFIX) &&
-            (lowerText === 'tavik' ||
-             lowerText.startsWith('tavik ') ||
-             lowerText.includes(' tavik ') ||
-             lowerText.endsWith(' tavik'))) {
+        // ── Name trigger: responds when someone says "tavik" ──
+        const lower = text.toLowerCase().trim()
+        if (!text.startsWith(PREFIX) && (
+            lower === 'tavik' ||
+            lower.startsWith('tavik ') ||
+            lower.includes(' tavik ') ||
+            lower.endsWith(' tavik') ||
+            lower.includes('@tavik')
+        )) {
             const responses = [
-                `👀 You called? I'm *${BOT_NAME}* — how can I help?\nType *${PREFIX}menu* to see what I can do!`,
-                `⚡ Yes? *${BOT_NAME}* is here! Type *${PREFIX}menu* for commands.`,
-                `🤖 *${BOT_NAME}* at your service! What do you need?\nType *${PREFIX}ai <question>* to chat with me!`,
-                `👋 Hey! You mentioned me. I'm *${BOT_NAME}*!\nType *${PREFIX}menu* to see all commands.`,
-                `🔥 Someone said my name! I'm *${BOT_NAME}*. Need help? Type *${PREFIX}menu*`,
+                `👀 You called? I'm *${BOT_NAME}*!\nType *${PREFIX}menu* to see what I can do 🔥`,
+                `⚡ *${BOT_NAME}* is here! Need something?\nTry *${PREFIX}ai <question>* to chat with me!`,
+                `🤖 Yes? *${BOT_NAME}* at your service!\nType *${PREFIX}menu* for all commands.`,
+                `👋 Heard my name! I'm *${BOT_NAME}* 🤖\nWhat do you need?`,
+                `🔥 Someone said *Tavik*! That's me!\nType *${PREFIX}menu* to get started.`,
             ]
             await api.sendTyping(chatId, 1)
             return api.sendText(chatId, pick(responses), msgKeyId)
@@ -136,22 +135,22 @@ async function handleMessage(msg) {
         // ── Auto reply ────────────────────────────────────────
         if (state.autoreply[chatId] && text && !text.startsWith(PREFIX)) {
             await api.sendTyping(chatId, 2)
-            await api.sendText(chatId, `🤖 Auto Reply!\nType *${PREFIX}menu* to see all commands.`)
+            await api.sendText(chatId, `🤖 Auto Reply!\nType *${PREFIX}menu* for commands.`)
             return
         }
 
-        // ── Chatbot mode ──────────────────────────────────────
+        // ── Chatbot: AI replies to every non-command message ──
         if (state.chatbot[chatId] && text && !text.startsWith(PREFIX)) {
             await api.sendTyping(chatId, 2)
-            const reply = await utils.askAI(text)
-            return api.sendText(chatId, `🤖 ${reply}\n\n_⚡ ${BOT_NAME} AI_`, msgKeyId)
+            const reply = await utils.askAI(text,
+                'You are a friendly, smart WhatsApp chatbot. Be natural, helpful and concise. Keep responses short (1-3 sentences unless asked for more).')
+            return api.sendText(chatId, reply, msgKeyId)
         }
 
         // ── Route to commands ─────────────────────────────────
         if (!text || !text.startsWith(PREFIX)) return
 
         console.log(`[CMD] Owner:${isOwner} Sudo:${isSudo} | ${senderNumber} → ${text}`)
-        // Pass full msg object so commands can access quoted message info
         await handleCommand(chatId, senderNumber, text, msgKeyId, isOwner, isSudo, isGroup, msg)
 
     } catch (err) {
