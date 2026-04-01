@@ -3,7 +3,7 @@
 const api    = require('./api')
 const state  = require('./state')
 const { handleCommand } = require('./commands')
-const { OWNER_NUMBERS, BAD_WORDS, PREFIX, BOT_NAME } = require('./config')
+const { OWNER_NUMBERS, BAD_WORDS, PREFIX, BOT_NAME, CHATBOT_RATE_LIMIT, CHATBOT_RATE_WINDOW_MS } = require('./config')
 const utils  = require('./utils')
 
 const pick = arr => arr[Math.floor(Math.random() * arr.length)]
@@ -18,16 +18,36 @@ function checkIsOwner(senderNumber) {
     return OWNER_NUMBERS.some(ownerRaw => {
         const owner = cleanNumber(ownerRaw)
         if (!owner) return false
-        if (sender === owner) return true
+        if (sender === owner)                            return true
         if (sender.length > 6 && owner.endsWith(sender)) return true
         if (owner.length  > 6 && sender.endsWith(owner)) return true
         return false
     })
 }
 
+// ── Chatbot rate limiter ──────────────────────────────────────
+// Returns true if the message should be allowed, false if rate-limited
+function chatbotAllowed(chatId) {
+    const now = Date.now()
+    if (!state.chatbotRate[chatId]) {
+        state.chatbotRate[chatId] = { count: 1, windowStart: now }
+        return true
+    }
+    const r = state.chatbotRate[chatId]
+    if (now - r.windowStart > CHATBOT_RATE_WINDOW_MS) {
+        // New window
+        r.count       = 1
+        r.windowStart = now
+        return true
+    }
+    r.count++
+    return r.count <= CHATBOT_RATE_LIMIT
+}
+
 async function handleMessage(msg) {
     try {
         if (!msg) return
+        // Skip messages sent by the bot itself
         if (msg.key?.fromMe === true) return
 
         const msgContent = msg.message
@@ -59,10 +79,9 @@ async function handleMessage(msg) {
         const isSudo       = state.sudoUsers.includes(senderNumber)
         const isPrivileged = isOwner || isSudo
 
-        console.log(`[MSG] ${senderNumber} | Owner:${isOwner} | Sudo:${isSudo} | Group:${isGroup} | "${text}"`)
+        console.log(`[MSG] ${senderNumber} | Owner:${isOwner} | Sudo:${isSudo} | Group:${isGroup} | "${text.slice(0,60)}"`)
 
-        // ── Self mode: works in BOTH DMs and groups ───────────
-        // Owners always pass through, everyone else is blocked
+        // ── Self mode: only owners pass through ───────────────
         if (state.selfMode && !isOwner) return
 
         // ── Auto read ─────────────────────────────────────────
@@ -71,7 +90,7 @@ async function handleMessage(msg) {
         // ── Auto react ────────────────────────────────────────
         if (state.autoreact && text && msgKeyId) {
             const emojis = ['❤️', '😂', '🔥', '⚡', '👍', '🎉', '😍', '🤩']
-            await api.sendReaction(chatId, msgKeyId, emojis[Math.floor(Math.random() * emojis.length)]).catch(() => {})
+            await api.sendReaction(chatId, msgKeyId, pick(emojis)).catch(() => {})
         }
 
         // ── Auto typing ───────────────────────────────────────
@@ -83,7 +102,7 @@ async function handleMessage(msg) {
         if (isGroup && state.antilink[chatId] && !isPrivileged) {
             if (/(https?:\/\/|wa\.me\/|chat\.whatsapp\.com)/i.test(text)) {
                 await api.deleteMessage(chatId, msgKeyId).catch(() => {})
-                await api.sendText(chatId, `⚠️ @${senderNumber} Links are not allowed!`)
+                await api.sendText(chatId, `⚠️ @${senderNumber} Links are not allowed here!`)
                 return
             }
         }
@@ -112,13 +131,13 @@ async function handleMessage(msg) {
             }
         }
 
-        // ── Name trigger: responds when someone says "tavik" ──
+        // ── Name trigger: responds when "tavik" is mentioned ──
         const lower = text.toLowerCase().trim()
         if (!text.startsWith(PREFIX) && (
-            lower === 'tavik' ||
+            lower === 'tavik'          ||
             lower.startsWith('tavik ') ||
-            lower.includes(' tavik ') ||
-            lower.endsWith(' tavik') ||
+            lower.includes(' tavik ')  ||
+            lower.endsWith(' tavik')   ||
             lower.includes('@tavik')
         )) {
             const responses = [
@@ -126,7 +145,7 @@ async function handleMessage(msg) {
                 `⚡ *${BOT_NAME}* is here! Need something?\nTry *${PREFIX}ai <question>* to chat with me!`,
                 `🤖 Yes? *${BOT_NAME}* at your service!\nType *${PREFIX}menu* for all commands.`,
                 `👋 Heard my name! I'm *${BOT_NAME}* 🤖\nWhat do you need?`,
-                `🔥 Someone said *Tavik*! That's me!\nType *${PREFIX}menu* to get started.`,
+                `🔥 Someone said my name! What can I do for you?\nType *${PREFIX}menu* to get started.`,
             ]
             await api.sendTyping(chatId, 1)
             return api.sendText(chatId, pick(responses), msgKeyId)
@@ -139,12 +158,19 @@ async function handleMessage(msg) {
             return
         }
 
-        // ── Chatbot: AI replies to every non-command message ──
+        // ── Chatbot — works in DMs AND group chats ────────────
+        // Applies whenever chatbot is enabled for this chatId (DM or GC)
         if (state.chatbot[chatId] && text && !text.startsWith(PREFIX)) {
+            // Rate limit check — silently skip if exceeded
+            if (!chatbotAllowed(chatId)) {
+                console.log(`[CHATBOT] Rate limited: ${chatId}`)
+                return
+            }
             await api.sendTyping(chatId, 2)
             const reply = await utils.askAI(text,
-                'You are a friendly, smart WhatsApp chatbot. Be natural, helpful and concise. Keep responses short (1-3 sentences unless asked for more).')
-            return api.sendText(chatId, reply, msgKeyId)
+                'You are a friendly, intelligent WhatsApp assistant. Be helpful, natural, and concise. Keep replies to 1-3 sentences unless asked for more detail. Avoid mentioning what tools or frameworks power you.')
+            if (reply) return api.sendText(chatId, reply, msgKeyId)
+            return
         }
 
         // ── Route to commands ─────────────────────────────────
