@@ -38,15 +38,17 @@ app.post('/webhook', async (req, res) => {
         const data = body.data
         if (!data) return
 
-        // Single message
-        if (data.key) {
-            await handleMessage(data)
-        }
-        // Array of messages
-        else if (Array.isArray(data)) {
-            for (const msg of data) {
-                if (msg?.key) await handleMessage(msg)
-            }
+        // Evolution API sends: data.messages (array) OR data (array) OR data (single msg with key)
+        const messages =
+            Array.isArray(data.messages) ? data.messages :
+            Array.isArray(data)          ? data           :
+            data.key                     ? [data]         :
+            []
+
+        for (const msg of messages) {
+            if (msg?.key) await handleMessage(msg).catch(e =>
+                console.error('[MSG ERROR]', e.message)
+            )
         }
 
     } catch (err) {
