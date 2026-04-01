@@ -8,7 +8,8 @@ module.exports = {
     antilink    : {},
     antispam    : {},
     spamCount   : {},
-    chatbot     : {},   // per-chat chatbot mode
+    chatbot     : {},
+    warnings    : {},
     autoread    : false,
     autoreact   : false,
     autotyping  : false,
