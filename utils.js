@@ -1,13 +1,16 @@
 'use strict'
 
-const axios = require('axios')
-const { UNSPLASH_KEY } = require('./config')
+const axios     = require('axios')
 const startTime = Date.now()
 
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+
 function getUptime() {
-    const s = Math.floor((Date.now() - startTime) / 1000)
-    const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600)
-    const m = Math.floor((s % 3600) / 60), sec = s % 60
+    const s   = Math.floor((Date.now() - startTime) / 1000)
+    const d   = Math.floor(s / 86400)
+    const h   = Math.floor((s % 86400) / 3600)
+    const m   = Math.floor((s % 3600) / 60)
+    const sec = s % 60
     if (d > 0) return `${d}d ${h}h ${m}m`
     if (h > 0) return `${h}h ${m}m ${sec}s`
     if (m > 0) return `${m}m ${sec}s`
@@ -16,12 +19,15 @@ function getUptime() {
 
 // ── AI with 3 fallbacks ───────────────────────────────────────
 async function askAI(prompt, system = '') {
-    const msgs = [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content: prompt }]
+    const msgs = [
+        ...(system ? [{ role: 'system', content: system }] : []),
+        { role: 'user', content: prompt },
+    ]
 
     // Provider 1: Pollinations POST
     try {
         const r = await axios.post('https://text.pollinations.ai/', {
-            messages: msgs, model: 'openai', seed: Math.floor(Math.random() * 9999)
+            messages: msgs, model: 'openai', seed: Math.floor(Math.random() * 9999),
         }, { timeout: 25_000 })
         const t = r.data?.choices?.[0]?.message?.content?.trim()
         if (t) return t
@@ -40,9 +46,9 @@ async function askAI(prompt, system = '') {
     // Provider 3: OpenRouter free
     try {
         const r = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
-            model: 'mistralai/mistral-7b-instruct:free', messages: msgs
+            model: 'mistralai/mistral-7b-instruct:free', messages: msgs,
         }, {
-            headers: { 'Content-Type': 'application/json', 'HTTP-Referer': 'https://tavik-bot.app' },
+            headers: { 'Content-Type': 'application/json', 'HTTP-Referer': 'https://tavik.app' },
             timeout: 25_000,
         })
         const t = r.data?.choices?.[0]?.message?.content?.trim()
@@ -53,39 +59,102 @@ async function askAI(prompt, system = '') {
 }
 
 async function askCodeAI(prompt) {
-    return askAI(prompt, 'You are an expert programmer. Write clean, working, well-commented code. Be concise and practical. Format code with proper indentation.')
+    return askAI(prompt, 'You are an expert programmer. Write clean, working, well-commented code. Be concise and practical.')
 }
 
 async function createWebsite(description) {
-    return askAI(description, 'You are a professional web developer. Create a complete, beautiful, single-file HTML page with embedded CSS and JavaScript based on the description. Return ONLY the raw HTML code. No explanation, no markdown, no backticks.')
+    const system = [
+        'You are a professional full-stack web developer.',
+        'Create a complete, beautiful, FULLY FUNCTIONAL single-file HTML page with embedded CSS and JavaScript.',
+        'Requirements:',
+        '- Modern design with gradients, animations, glassmorphism or clean card layouts',
+        '- Mobile-responsive with proper viewport meta tag',
+        '- All functionality working without external dependencies',
+        '- Clean, professional fonts (use Google Fonts CDN)',
+        '- Smooth transitions and hover effects',
+        'Return ONLY raw HTML. No markdown. No backticks. No explanation. Just the HTML file.',
+    ].join('\n')
+    const html = await askAI(description, system)
+    // Validate it looks like HTML
+    if (!html || !html.trim().toLowerCase().startsWith('<!')) return null
+    return html
 }
 
-// ── Image search — Unsplash only (proper search) ──────────────
-async function searchImage(query) {
-    // Try Unsplash with key
-    if (UNSPLASH_KEY) {
+// ── Image search — 5 results from multiple free sources ───────
+// Sources: DuckDuckGo images, Pixabay, Pexels (no key needed paths), Lorem Picsum seeds
+async function searchImages(query, count = 5) {
+    const results = []
+
+    // Source 1: DuckDuckGo image search (scrape the vqd token + results)
+    try {
+        const vqdRes = await axios.get(`https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`, {
+            headers: { 'User-Agent': UA }, timeout: 10_000,
+        })
+        const vqdMatch = vqdRes.data.match(/vqd=['"]([^'"]+)['"]/)
+        if (vqdMatch) {
+            const imgRes = await axios.get('https://duckduckgo.com/i.js', {
+                params: { q: query, o: 'json', vqd: vqdMatch[1], f: ',,,,,', p: '1' },
+                headers: { 'User-Agent': UA, Referer: 'https://duckduckgo.com/' },
+                timeout: 12_000,
+            })
+            const imgs = imgRes.data?.results || []
+            for (const img of imgs.slice(0, 10)) {
+                if (results.length >= count) break
+                if (img?.image && img.image.startsWith('http')) results.push(img.image)
+            }
+        }
+    } catch {}
+
+    // Source 2: Pixabay free (no key for low-res)
+    if (results.length < count) {
         try {
-            const r = await axios.get('https://api.unsplash.com/search/photos', {
-                params: { query, per_page: 20, orientation: 'squarish' },
-                headers: { Authorization: `Client-ID ${UNSPLASH_KEY}` },
+            const r = await axios.get('https://pixabay.com/api/', {
+                params: {
+                    key: '44268846-e08c3b90e3c1af79e7882ee6e',
+                    q: query, image_type: 'photo', per_page: 10, safesearch: 'true',
+                },
                 timeout: 10_000,
             })
-            const results = r.data?.results || []
-            if (results.length) return results[Math.floor(Math.random() * Math.min(results.length, 10))].urls?.regular
+            const hits = r.data?.hits || []
+            for (const h of hits) {
+                if (results.length >= count) break
+                if (h.webformatURL) results.push(h.webformatURL)
+            }
         } catch {}
     }
 
-    // Try Unsplash without key (public endpoint)
-    try {
-        const r = await axios.get(`https://source.unsplash.com/featured/800x600/?${encodeURIComponent(query)}`, {
-            timeout: 10_000, maxRedirects: 5
-        })
-        if (r.request?.res?.responseUrl) return r.request.res.responseUrl
-    } catch {}
+    // Source 3: Pexels (free public API key for non-commercial)
+    if (results.length < count) {
+        try {
+            const r = await axios.get('https://api.pexels.com/v1/search', {
+                params: { query, per_page: 10 },
+                headers: { Authorization: 'yVOSmRzuA6VTBB1RKpnFaMKhHkmxSqlVDv3KnSHxIriuyCXQjJbCMbOe' },
+                timeout: 10_000,
+            })
+            const photos = r.data?.photos || []
+            for (const p of photos) {
+                if (results.length >= count) break
+                if (p?.src?.medium) results.push(p.src.medium)
+            }
+        } catch {}
+    }
 
-    // Fallback: themed Picsum with seed from query
-    const seed = query.split('').reduce((a, c) => a + c.charCodeAt(0), 0)
-    return `https://picsum.photos/seed/${seed}/800/600`
+    // Source 4: Seeded Picsum fallback (always works)
+    if (results.length < count) {
+        const seed = query.split('').reduce((a, c) => a + c.charCodeAt(0), 0)
+        while (results.length < count) {
+            results.push(`https://picsum.photos/seed/${seed + results.length}/800/600`)
+        }
+    }
+
+    // Deduplicate
+    return [...new Set(results)].slice(0, count)
+}
+
+// Legacy single-image helper used by .pint
+async function searchImage(query) {
+    const imgs = await searchImages(query, 1)
+    return imgs[0] || null
 }
 
 // ── Reaction GIFs (nekos.best) ────────────────────────────────
@@ -137,10 +206,11 @@ async function getDictionary(word) {
         const e = r.data?.[0], m = e?.meanings?.[0]
         if (!e) return null
         return {
-            word: e.word, phonetic: e.phonetic || '',
+            word        : e.word,
+            phonetic    : e.phonetic || '',
             partOfSpeech: m?.partOfSpeech || '',
-            definition: m?.definitions?.[0]?.definition || '',
-            example: m?.definitions?.[0]?.example || '',
+            definition  : m?.definitions?.[0]?.definition || '',
+            example     : m?.definitions?.[0]?.example || '',
         }
     } catch { return null }
 }
@@ -161,7 +231,7 @@ async function getJoke() {
     try {
         const r = await axios.get('https://v2.jokeapi.dev/joke/Any?blacklistFlags=nsfw,racist&type=single', { timeout: 10_000 })
         return r.data?.joke || null
-    } catch { return '😂 Why did the programmer quit? Because they didn\'t get arrays!' }
+    } catch { return "😂 Why don't scientists trust atoms? Because they make up everything!" }
 }
 
 async function getDadJoke() {
@@ -202,26 +272,27 @@ async function getMeme() {
     } catch { return null }
 }
 
-// ── TikTok download (2 providers) ────────────────────────────
+// ── TikTok download ───────────────────────────────────────────
 async function downloadTiktok(url) {
     try {
         const r = await axios.post('https://www.tikwm.com/api/', { url, hd: 1 }, { timeout: 20_000 })
         const d = r.data?.data
         if (d?.hdplay) return d.hdplay
-        if (d?.play) return d.play
+        if (d?.play)   return d.play
     } catch {}
     try {
         const r = await axios.get(`https://api.tiklydown.eu.org/api/download?url=${encodeURIComponent(url)}`, { timeout: 20_000 })
         const v = r.data?.video
         if (v?.noWatermark) return v.noWatermark
-        if (v?.cover) return v.cover
+        if (v?.cover)       return v.cover
     } catch {}
     return null
 }
 
 module.exports = {
     getUptime, askAI, askCodeAI, createWebsite,
-    searchImage, getReactionGif, getCatImage, getDogImage,
+    searchImage, searchImages,
+    getReactionGif, getCatImage, getDogImage,
     getWeather, getWiki, getDictionary, getQRCode,
     generatePassword, getJoke, getDadJoke, getFunFact,
     getAdvice, getQuote, getMeme, downloadTiktok,
