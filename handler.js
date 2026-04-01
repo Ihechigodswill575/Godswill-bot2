@@ -99,34 +99,28 @@ async function handleMessage(msg) {
         const isPrivileged = isOwner || isSudo
 
         // ── Check if sender is a WhatsApp group admin ─────────
-        // Evolution API does NOT support findGroupInfos reliably, so we
-        // read admin status directly from the webhook payload Evolution sends us.
-        // Evolution API injects groupMetadata into the message object.
+        // Evolution API does NOT inject groupMetadata into webhook payloads.
+        // We fetch it live from the Evolution API when needed.
         let isGroupAdmin = false
         if (isGroup) {
-            const participants =
-                msg?.groupMetadata?.participants ||
-                msg?.message?.groupMetadata?.participants ||
-                msg?.data?.groupMetadata?.participants ||
-                []
-
-            if (participants.length > 0) {
-                isGroupAdmin = participants.some(p => {
-                    const num = cleanNumber(p.id || p.jid || '')
-                    const admin = p.admin || p.rank || ''
-                    return num === senderNumber && (
-                        p.isAdmin === true ||
-                        p.isSuperAdmin === true ||
-                        admin === 'admin' ||
-                        admin === 'superadmin'
-                    )
-                })
-                console.log(`[ADMIN CHECK] Found ${participants.length} participants in payload, isGroupAdmin=${isGroupAdmin}`)
-            } else {
-                // No participants in payload — log the raw msg keys so we can debug
-                console.log(`[ADMIN CHECK] No participants in payload. msg keys: ${Object.keys(msg || {}).join(', ')}`)
+            try {
+                const info = await api.getGroupInfo(chatId)
+                const participants = info?.participants || []
+                if (participants.length > 0) {
+                    isGroupAdmin = participants.some(p => {
+                        const num   = cleanNumber(p.id || p.jid || '')
+                        const admin = (p.admin || p.rank || '').toLowerCase()
+                        return num === senderNumber && (
+                            p.isAdmin === true      ||
+                            p.isSuperAdmin === true ||
+                            admin === 'admin'       ||
+                            admin === 'superadmin'
+                        )
+                    })
+                }
+            } catch {
+                // silently ignore — isGroupAdmin stays false
             }
-
             console.log(`[MSG] ${senderNumber} | Owner:${isOwner} | Sudo:${isSudo} | GroupAdmin:${isGroupAdmin} | Group:${isGroup} | "${text.slice(0,60)}"`)
         } else {
             console.log(`[MSG] ${senderNumber} | Owner:${isOwner} | Sudo:${isSudo} | Group:${isGroup} | "${text.slice(0,60)}"`)
