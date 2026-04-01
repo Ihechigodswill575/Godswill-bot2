@@ -9,24 +9,30 @@ const utils  = require('./utils')
 const pick = arr => arr[Math.floor(Math.random() * arr.length)]
 
 function cleanNumber(jid = '') {
-    return jid.replace(/@s\.whatsapp\.net|@g\.us/g, '').replace(/[^0-9]/g, '').replace(/^0+/, '')
+    return jid
+        .replace(/@s\.whatsapp\.net|@g\.us|@lid/g, '')
+        .replace(/[^0-9]/g, '')
+        .replace(/^0+/, '')
 }
 
-function checkIsOwner(senderNumber) {
-    const sender = cleanNumber(senderNumber)
-    if (!sender) return false
+function checkIsOwner(senderRaw) {
+    const sender = cleanNumber(senderRaw)
+    if (!sender || sender.length < 5) return false
+
+    console.log(`[OWNER CHECK] sender="${sender}" against owners=[${OWNER_NUMBERS.map(cleanNumber).join(', ')}]`)
+
     return OWNER_NUMBERS.some(ownerRaw => {
         const owner = cleanNumber(ownerRaw)
         if (!owner) return false
-        if (sender === owner)                            return true
-        if (sender.length > 6 && owner.endsWith(sender)) return true
-        if (owner.length  > 6 && sender.endsWith(owner)) return true
+        if (sender === owner) return true
+        // Suffix match handles country-code variations
+        if (sender.length >= 7 && owner.endsWith(sender)) return true
+        if (owner.length  >= 7 && sender.endsWith(owner)) return true
         return false
     })
 }
 
 // ── Chatbot rate limiter ──────────────────────────────────────
-// Returns true if the message should be allowed, false if rate-limited
 function chatbotAllowed(chatId) {
     const now = Date.now()
     if (!state.chatbotRate[chatId]) {
@@ -35,7 +41,6 @@ function chatbotAllowed(chatId) {
     }
     const r = state.chatbotRate[chatId]
     if (now - r.windowStart > CHATBOT_RATE_WINDOW_MS) {
-        // New window
         r.count       = 1
         r.windowStart = now
         return true
@@ -47,7 +52,6 @@ function chatbotAllowed(chatId) {
 async function handleMessage(msg) {
     try {
         if (!msg) return
-        // Skip messages sent by the bot itself
         if (msg.key?.fromMe === true) return
 
         const msgContent = msg.message
@@ -69,10 +73,26 @@ async function handleMessage(msg) {
         const chatId = msg.key?.remoteJid || ''
         if (!chatId) return
 
-        const isGroup      = chatId.endsWith('@g.us')
-        const senderJid    = isGroup ? (msg.key?.participant || '') : chatId
+        const isGroup = chatId.endsWith('@g.us')
+
+        // In groups the real sender is in participant — NOT remoteJid (which is the group JID)
+        // Evolution API may populate it in slightly different spots
+        let senderJid = ''
+        if (isGroup) {
+            senderJid =
+                msg.key?.participant ||
+                msg.participant      ||
+                ''
+        } else {
+            // DM: remoteJid IS the sender
+            senderJid = chatId
+        }
+
         const senderNumber = cleanNumber(senderJid)
-        if (!senderNumber) return
+        if (!senderNumber) {
+            console.log(`[WARN] Could not extract sender from JID: "${senderJid}" chatId: "${chatId}"`)
+            return
+        }
 
         const msgKeyId     = msg.key?.id || null
         const isOwner      = checkIsOwner(senderNumber)
@@ -81,7 +101,7 @@ async function handleMessage(msg) {
 
         console.log(`[MSG] ${senderNumber} | Owner:${isOwner} | Sudo:${isSudo} | Group:${isGroup} | "${text.slice(0,60)}"`)
 
-        // ── Self mode: only owners pass through ───────────────
+        // ── Self mode ─────────────────────────────────────────
         if (state.selfMode && !isOwner) return
 
         // ── Auto read ─────────────────────────────────────────
@@ -131,7 +151,7 @@ async function handleMessage(msg) {
             }
         }
 
-        // ── Name trigger: responds when "tavik" is mentioned ──
+        // ── Name trigger ──────────────────────────────────────
         const lower = text.toLowerCase().trim()
         if (!text.startsWith(PREFIX) && (
             lower === 'tavik'          ||
@@ -158,22 +178,20 @@ async function handleMessage(msg) {
             return
         }
 
-        // ── Chatbot — works in DMs AND group chats ────────────
-        // Applies whenever chatbot is enabled for this chatId (DM or GC)
+        // ── Chatbot ───────────────────────────────────────────
         if (state.chatbot[chatId] && text && !text.startsWith(PREFIX)) {
-            // Rate limit check — silently skip if exceeded
             if (!chatbotAllowed(chatId)) {
                 console.log(`[CHATBOT] Rate limited: ${chatId}`)
                 return
             }
             await api.sendTyping(chatId, 2)
             const reply = await utils.askAI(text,
-                'You are a friendly, intelligent WhatsApp assistant. Be helpful, natural, and concise. Keep replies to 1-3 sentences unless asked for more detail. Avoid mentioning what tools or frameworks power you.')
+                'You are a friendly, intelligent WhatsApp assistant. Be helpful, natural, and concise. Keep replies to 1-3 sentences unless asked for more detail. Never reveal what technology or framework powers you.')
             if (reply) return api.sendText(chatId, reply, msgKeyId)
             return
         }
 
-        // ── Route to commands ─────────────────────────────────
+        // ── Commands ──────────────────────────────────────────
         if (!text || !text.startsWith(PREFIX)) return
 
         console.log(`[CMD] Owner:${isOwner} Sudo:${isSudo} | ${senderNumber} → ${text}`)
