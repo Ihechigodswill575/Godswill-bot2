@@ -62,6 +62,14 @@ function buildMenu(chatId) {
  │ ai <question>
  │ codeai <request>
  │ createwebsite <desc>
+ │ translate <lang> <text>
+ │ lyrics <song>
+ │ shorturl <url>
+ │ screenshot <url>
+ │ carbon <code>
+ │ ipinfo <ip>
+ │ reverse <text>
+ │ encode/decode <text>
  │ wiki <topic>
  │ define <word>
  │ weather <city>
@@ -86,6 +94,10 @@ function buildMenu(chatId) {
  │ funfact  advice
  │ quote  roast
  │ compliment
+ │ ship @user1 @user2
+ │ fakeid
+ │ trivia  .answer <n>
+ │ stoptrivia
  ╰─────────────────
 
  ╭─❏ 💞 ʀᴇᴀᴄᴛɪᴏɴs ❏
@@ -116,6 +128,10 @@ function buildMenu(chatId) {
  │ antispam on/off
  │ antibadword on/off
  │ antidelete on/off
+ │ antighostping on/off
+ │ welcome on/off/msg
+ │ goodbye off/msg
+ │ announce on/off
  │ autoread on/off
  │ autoreact on/off
  │ autotyping on/off
@@ -779,6 +795,462 @@ async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup
         }
         return api.sendText(chatId, `✅ *${target}* reported ${reported}/5 times!`, qid)
     }
+
+    // NEW COMMANDS BELOW
+
+    // TRANSLATE
+    if (cmd === `${PREFIX}translate` || cmd === `${PREFIX}tr`) {
+        if (!query) return api.sendText(chatId, `❌ Usage: .translate <lang> <text>`, qid)
+        await api.sendTyping(chatId, 2)
+        const tparts = query.split(' ')
+        const knownLangs = ['english','french','spanish','arabic','hausa','yoruba','igbo','portuguese','german','chinese','japanese','korean','hindi','russian','italian','pidgin']
+        let tLang, tText
+        if (knownLangs.includes(tparts[0].toLowerCase()) || (tparts[0].length <= 3 && tparts.length > 1)) {
+            tLang = tparts[0]; tText = tparts.slice(1).join(' ')
+        } else { tLang = 'English'; tText = query }
+        if (!tText) return api.sendText(chatId, `❌ No text to translate!`, qid)
+        const tResult = await utils.translateText(tText, tLang)
+        return api.sendText(chatId, `╭─❏ 🌐 ᴛʀᴀɴsʟᴀᴛᴇ ❏\n │ 🗣️ To: *${tLang}*\n │\n │ ${tResult}\n ╰─────────────────`, qid)
+    }
+
+    // LYRICS
+    if (cmd === `${PREFIX}lyrics`) {
+        if (!query) return api.sendText(chatId, `❌ Usage: .lyrics <song name>`, qid)
+        await api.sendTyping(chatId, 3)
+        await api.sendText(chatId, `🎵 Searching for *${query}*...`, qid)
+        const lyr = await utils.getLyrics(query)
+        if (!lyr) return api.sendText(chatId, `❌ Lyrics not found for "${query}"`, qid)
+        const body = lyr.lyrics.slice(0, 2800)
+        return api.sendText(chatId, `╭─❏ 🎵 ʟʏʀɪᴄs ❏\n │ 🎤 *${lyr.title}*\n │ 👤 ${lyr.artist || 'Unknown'}\n │\n${body}${lyr.lyrics.length > 2800 ? '\n...(truncated)' : ''}\n ╰─────────────────`, qid)
+    }
+
+    // SHORT URL
+    if (cmd === `${PREFIX}shorturl` || cmd === `${PREFIX}shorten`) {
+        if (!query) return api.sendText(chatId, `❌ Usage: .shorturl <url>`, qid)
+        await api.sendTyping(chatId, 1)
+        const surl = await utils.shortenUrl(query)
+        if (!surl) return api.sendText(chatId, `❌ Failed to shorten URL!`, qid)
+        return api.sendText(chatId, `╭─❏ 🔗 sʜᴏʀᴛ ᴜʀʟ ❏\n │ ✅ ${surl}\n ╰─────────────────`, qid)
+    }
+
+    // SCREENSHOT
+    if (cmd === `${PREFIX}screenshot` || cmd === `${PREFIX}ss`) {
+        if (!query) return api.sendText(chatId, `❌ Usage: .screenshot <url>`, qid)
+        await api.sendTyping(chatId, 3)
+        await api.sendText(chatId, `📸 Taking screenshot...`, qid)
+        const ssUrl = utils.screenshotUrl(query)
+        return api.sendImage(chatId, ssUrl, `📸 *Screenshot:* ${query}`, qid)
+    }
+
+    // WELCOME
+    if ((cmd === `${PREFIX}welcome` || cmd === `${PREFIX}setwelcome`) && isGroup && isPrivileged) {
+        if (!state.welcome[chatId]) state.welcome[chatId] = { enabled: false, msg: '', byeMsg: '' }
+        if (args[1] === 'off') { state.welcome[chatId].enabled = false; return api.sendText(chatId, `👋 Welcome: *OFF ❌*`, qid) }
+        if (args[1] === 'on')  { state.welcome[chatId].enabled = true;  return api.sendText(chatId, `👋 Welcome: *ON ✅*`, qid) }
+        if (query) { state.welcome[chatId].msg = query; state.welcome[chatId].enabled = true; return api.sendText(chatId, `✅ Welcome message set!`, qid) }
+        return api.sendText(chatId, `❌ Usage: .welcome on/off  or  .welcome <custom msg>`, qid)
+    }
+
+    // GOODBYE
+    if ((cmd === `${PREFIX}goodbye` || cmd === `${PREFIX}setgoodbye`) && isGroup && isPrivileged) {
+        if (!state.welcome[chatId]) state.welcome[chatId] = { enabled: false, msg: '', byeMsg: '' }
+        if (args[1] === 'off') { state.welcome[chatId].byeMsg = ''; return api.sendText(chatId, `👋 Goodbye: *OFF ❌*`, qid) }
+        if (query) { state.welcome[chatId].byeMsg = query; state.welcome[chatId].enabled = true; return api.sendText(chatId, `✅ Goodbye message set!`, qid) }
+        return api.sendText(chatId, `❌ Usage: .goodbye <message>  or  .goodbye off`, qid)
+    }
+
+    // ANTI GHOST PING
+    if (cmd === `${PREFIX}antighostping` || cmd === `${PREFIX}antighost`) {
+        if (!isPrivileged) return api.sendText(chatId, `❌ Not authorized!`, qid)
+        state.antiGhostPing[chatId] = args[1] === 'on'
+        return api.sendText(chatId, `👻 Anti Ghost Ping: *${state.antiGhostPing[chatId] ? 'ON ✅' : 'OFF ❌'}*`, qid)
+    }
+
+    // TRIVIA
+    if (cmd === `${PREFIX}trivia`) {
+        if (state.trivia[chatId] && state.trivia[chatId].active) {
+            const t = state.trivia[chatId]
+            return api.sendText(chatId, `⚠️ Trivia still active!\n\n❓ *${t.question}*\n\n${t.options.map((o,i) => `${i+1}. ${o}`).join('\n')}\n\n_Reply .answer <number> to answer!_`, qid)
+        }
+        await api.sendTyping(chatId, 2)
+        const tv = await utils.getTriviaQuestion()
+        if (!tv) return api.sendText(chatId, `❌ Could not fetch trivia!`, qid)
+        state.trivia[chatId] = { ...tv, active: true, startTime: Date.now() }
+        return api.sendText(chatId,
+            `╭─❏ 🧠 ᴛʀɪᴠɪᴀ ❏\n │\n │ ❓ *${tv.question}*\n │\n` +
+            tv.options.map((o, i) => ` │ ${i+1}. ${o}`).join('\n') +
+            `\n │\n │ _Reply .answer <number>_\n ╰─────────────────`, qid)
+    }
+
+    if (cmd === `${PREFIX}answer` && isGroup) {
+        const tv = state.trivia[chatId]
+        if (!tv || !tv.active) return api.sendText(chatId, `❌ No active trivia! Start one with *.trivia*`, qid)
+        const pick_n = parseInt(args[1]) - 1
+        if (isNaN(pick_n) || pick_n < 0 || pick_n >= tv.options.length)
+            return api.sendText(chatId, `❌ Pick a number between 1 and ${tv.options.length}`, qid)
+        const chosen = tv.options[pick_n]
+        const correct = chosen === tv.answer
+        state.trivia[chatId] = { active: false }
+        if (correct) {
+            const xpRes = utils.addXP(state, sender, sender, 15)
+            return api.sendText(chatId,
+                `✅ *Correct!* 🎉 @${sender} got it!\n\n🏆 Answer: *${tv.answer}*\n⚡ +15 XP earned!${xpRes.leveled ? '\n🎊 *LEVEL UP!* You are now Level ' + xpRes.level + '!' : ''}`, qid)
+        } else {
+            return api.sendText(chatId, `❌ *Wrong!* @${sender}\n\n💡 Correct answer: *${tv.answer}*`, qid)
+        }
+    }
+
+    if (cmd === `${PREFIX}stoptrivia` && isPrivileged && isGroup) {
+        if (!state.trivia[chatId] || !state.trivia[chatId].active)
+            return api.sendText(chatId, `❌ No active trivia to stop!`, qid)
+        const tv = state.trivia[chatId]
+        state.trivia[chatId] = { active: false }
+        return api.sendText(chatId, `🛑 Trivia stopped!\n\n💡 Answer was: *${tv.answer}*`, qid)
+    }
+
+    // RANK / LEVEL
+    if (cmd === `${PREFIX}rank` || cmd === `${PREFIX}level` || cmd === `${PREFIX}xp`) {
+        const target = extractTarget(args[1], quotedParticipant) || sender
+        const d = state.xpData && state.xpData[target]
+        if (!d) return api.sendText(chatId, `❌ @${target} has no XP yet! Use the bot more to earn XP.`, qid)
+        const allEntries = Object.entries(state.xpData || {}).sort((a,b) => (b[1].level*1000+b[1].xp)-(a[1].level*1000+a[1].xp))
+        const rank = allEntries.findIndex(e => e[0] === target) + 1
+        return api.sendText(chatId,
+            `╭─❏ 🏅 ʀᴀɴᴋ ❏\n` +
+            ` │ 👤 @${target}\n` +
+            ` │ 🎯 Level  : *${d.level}*\n` +
+            ` │ ⚡ XP     : *${d.xp}/${d.level * 100}*\n` +
+            ` │ 🏆 Rank   : *#${rank}*\n` +
+            ` ╰─────────────────`, qid)
+    }
+
+    // LEADERBOARD
+    if (cmd === `${PREFIX}leaderboard` || cmd === `${PREFIX}lb` || cmd === `${PREFIX}top`) {
+        const lb = utils.getLeaderboard(state, 10)
+        if (!lb) return api.sendText(chatId, `❌ No XP data yet!`, qid)
+        return api.sendText(chatId,
+            `╭─❏ 🏆 ʟᴇᴀᴅᴇʀʙᴏᴀʀᴅ ❏\n │\n${lb}\n │\n │ _Use .xp commands to level up!_\n ╰─────────────────`, qid)
+    }
+
+    // POLL
+    if (cmd === `${PREFIX}poll` && isGroup && isPrivileged) {
+        // Usage: .poll Question | Option1 | Option2 | Option3
+        const pollInput = query
+        if (!pollInput || !pollInput.includes('|'))
+            return api.sendText(chatId, `❌ Usage: *.poll Question | Option1 | Option2 | ...*\nExample: .poll Favourite color? | Red | Blue | Green`, qid)
+        const parts = pollInput.split('|').map(p => p.trim()).filter(Boolean)
+        const question = parts[0]
+        const options  = parts.slice(1)
+        if (options.length < 2) return api.sendText(chatId, `❌ Need at least 2 options!`, qid)
+        if (options.length > 8) return api.sendText(chatId, `❌ Maximum 8 options allowed!`, qid)
+        const emojis = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣']
+        state.polls[chatId] = { question, options, votes: {}, voters: {} }
+        return api.sendText(chatId,
+            `╭─❏ 📊 ᴘᴏʟʟ ❏\n` +
+            ` │ ❓ *${question}*\n │\n` +
+            options.map((o, i) => ` │ ${emojis[i]} ${o}`).join('\n') +
+            `\n │\n │ _Vote: .vote <number>_\n │ _Results: .pollresult_\n │ _End poll: .endpoll_\n ╰─────────────────`, qid)
+    }
+
+    if (cmd === `${PREFIX}vote` && isGroup) {
+        const poll = state.polls[chatId]
+        if (!poll) return api.sendText(chatId, `❌ No active poll! Create one with *.poll*`, qid)
+        const voteNum = parseInt(args[1]) - 1
+        if (isNaN(voteNum) || voteNum < 0 || voteNum >= poll.options.length)
+            return api.sendText(chatId, `❌ Pick a number between 1 and ${poll.options.length}`, qid)
+        if (poll.voters[sender]) return api.sendText(chatId, `⚠️ You already voted! You chose: *${poll.options[poll.voters[sender]]}*`, qid)
+        poll.voters[sender]  = voteNum
+        poll.votes[voteNum]  = (poll.votes[voteNum] || 0) + 1
+        return api.sendText(chatId, `✅ @${sender} voted for *${poll.options[voteNum]}*!`, qid)
+    }
+
+    if (cmd === `${PREFIX}pollresult` || cmd === `${PREFIX}pollresults`) {
+        const poll = state.polls[chatId]
+        if (!poll) return api.sendText(chatId, `❌ No active poll!`, qid)
+        const total = Object.values(poll.votes).reduce((a,b) => a+b, 0)
+        const emojis = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣']
+        const results = poll.options.map((o, i) => {
+            const v   = poll.votes[i] || 0
+            const pct = total ? Math.round(v/total*100) : 0
+            const bar = '█'.repeat(Math.floor(pct/10)) + '░'.repeat(10-Math.floor(pct/10))
+            return ` │ ${emojis[i]} ${o}\n │   ${bar} ${pct}% (${v})`
+        }).join('\n')
+        return api.sendText(chatId,
+            `╭─❏ 📊 ᴘᴏʟʟ ʀᴇsᴜʟᴛs ❏\n │ ❓ *${poll.question}*\n │ 👥 Total votes: ${total}\n │\n${results}\n ╰─────────────────`, qid)
+    }
+
+    if (cmd === `${PREFIX}endpoll` && isGroup && isPrivileged) {
+        const poll = state.polls[chatId]
+        if (!poll) return api.sendText(chatId, `❌ No active poll!`, qid)
+        const total = Object.values(poll.votes).reduce((a,b) => a+b, 0)
+        const winnerIdx = poll.options.reduce((best, _, i) => (poll.votes[i]||0) > (poll.votes[best]||0) ? i : best, 0)
+        const emojis = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣']
+        const results = poll.options.map((o, i) => {
+            const v = poll.votes[i] || 0
+            const pct = total ? Math.round(v/total*100) : 0
+            return ` │ ${emojis[i]} ${o} — ${v} votes (${pct}%)`
+        }).join('\n')
+        state.polls[chatId] = null
+        return api.sendText(chatId,
+            `╭─❏ 📊 ᴘᴏʟʟ ᴇɴᴅᴇᴅ ❏\n │ ❓ *${poll.question}*\n │ 👥 Total: ${total}\n │\n${results}\n │\n │ 🏆 Winner: *${poll.options[winnerIdx]}*\n ╰─────────────────`, qid)
+    }
+
+    // TAG ADMINS
+    if ((cmd === `${PREFIX}tagadmins` || cmd === `${PREFIX}admins`) && isGroup) {
+        const participants = await (async () => {
+            try { const info = await api.getGroupInfo(chatId); return info && info.participants ? info.participants : [] } catch { return [] }
+        })()
+        const admins = participants.filter(p => {
+            const rank = (p.admin || p.rank || '').toLowerCase()
+            return p.isAdmin || p.isSuperAdmin || rank === 'admin' || rank === 'superadmin'
+        })
+        if (!admins.length) return api.sendText(chatId, `❌ Could not fetch admin list!`, qid)
+        const mention = admins.map(a => `@${(a.id || a.jid || '').split('@')[0]}`).join(' ')
+        return api.sendText(chatId,
+            `╭─❏ 👑 ɢʀᴏᴜᴘ ᴀᴅᴍɪɴs ❏\n │ ${mention}\n │\n │ 📢 ${query || 'Attention admins!'}\n ╰─────────────────`, qid)
+    }
+
+    // BROADCAST (owner only — sends to all groups bot is in, from current chat)
+    if (cmd === `${PREFIX}broadcast` || cmd === `${PREFIX}bc`) {
+        if (!isOwner) return api.sendText(chatId, `❌ Owner only command!`, qid)
+        if (!query) return api.sendText(chatId, `❌ Usage: .broadcast <message>`, qid)
+        // Save broadcast request and confirm — actual multi-group broadcast requires group list from API
+        await api.sendText(chatId, `📢 *Broadcasting message...*`, qid)
+        // Try to get all groups and broadcast
+        let sent = 0
+        try {
+            const res = await api.request('get', `/group/fetchAllGroups/${process.env.EVO_INSTANCE || 'tavik-bot'}`)
+            const groups = Array.isArray(res) ? res : (res && res.groups) ? res.groups : []
+            for (const g of groups) {
+                const gid = g.id || g.groupJid
+                if (!gid) continue
+                try {
+                    await api.sendText(gid.includes('@') ? gid : gid + '@g.us',
+                        `📢 *Broadcast from ${require('./config').OWNER_NAME}:*\n\n${query}`)
+                    sent++
+                    await sleep(800)
+                } catch {}
+            }
+        } catch {}
+        return api.sendText(chatId, `✅ Broadcast sent to *${sent}* group(s)!`, qid)
+    }
+
+    // COMPLIMENT (was missing target support — enhanced)
+    if (cmd === `${PREFIX}compliment`) {
+        const target = extractTarget(args[1], quotedParticipant)
+        const compliments = [
+            'You are amazing and incredibly talented! 🌟',
+            'Your smile lights up every room you enter! ✨',
+            'You make the world a better place just by being in it! 🌍',
+            'You are stronger than you know! 💪',
+            'Your kindness is truly inspiring! 💖',
+            'You have a brilliant mind and a beautiful heart! 🧠❤️',
+            'Everything you do, you do with style! 💅',
+            'You are one of the most genuine people I know! 🙌',
+            'Your energy is absolutely contagious! ⚡',
+            'You deserve every good thing that comes your way! 🎁',
+        ]
+        const msg = pick(compliments)
+        if (target) return api.sendText(chatId, `💝 @${target}: ${msg}`, qid)
+        return api.sendText(chatId, `💝 ${msg}`, qid)
+    }
+
+    // SUDO LIST
+    if (cmd === `${PREFIX}sudolist` && isOwner) {
+        if (!state.sudoUsers || !state.sudoUsers.length)
+            return api.sendText(chatId, `╭─❏ 🛡️ sᴜᴅᴏ ʟɪsᴛ ❏\n │ No sudo users.\n ╰─────────────────`, qid)
+        return api.sendText(chatId,
+            `╭─❏ 🛡️ sᴜᴅᴏ ᴜsᴇʀs ❏\n` +
+            state.sudoUsers.map((u, i) => ` │ ${i+1}. @${u}`).join('\n') +
+            `\n ╰─────────────────`, qid)
+    }
+
+    if (cmd === `${PREFIX}addsudo` && isOwner) {
+        const target = extractTarget(args[1], quotedParticipant)
+        if (!target) return api.sendText(chatId, `❌ Usage: .addsudo <number>`, qid)
+        if (!state.sudoUsers.includes(target)) state.sudoUsers.push(target)
+        return api.sendText(chatId, `✅ @${target} added to sudo list!`, qid)
+    }
+
+    if (cmd === `${PREFIX}delsudo` && isOwner) {
+        const target = extractTarget(args[1], quotedParticipant)
+        if (!target) return api.sendText(chatId, `❌ Usage: .delsudo <number>`, qid)
+        state.sudoUsers = state.sudoUsers.filter(u => u !== target)
+        return api.sendText(chatId, `✅ @${target} removed from sudo list!`, qid)
+    }
+
+    // SHIP
+    if (cmd === `${PREFIX}ship`) {
+        const p1 = extractTarget(args[1], '') || sender
+        const p2 = extractTarget(args[2], quotedParticipant) || 'someone'
+        const pct = Math.floor(Math.random() * 101)
+        const hearts = pct >= 70 ? '❤️❤️❤️' : pct >= 40 ? '💛💛' : '💔'
+        const label  = pct >= 80 ? 'Perfect match! 💑' : pct >= 60 ? 'Good vibes! 💕' : pct >= 40 ? 'Maybe...? 😅' : 'Not meant to be 😬'
+        const bar    = '█'.repeat(Math.floor(pct/10)) + '░'.repeat(10-Math.floor(pct/10))
+        return api.sendText(chatId,
+            `╭─❏ 💘 sʜɪᴘ ❏\n` +
+            ` │ @${p1} + @${p2}\n │\n` +
+            ` │ ${hearts} *${pct}%* ${hearts}\n` +
+            ` │ [${bar}]\n` +
+            ` │ ${label}\n` +
+            ` ╰─────────────────`, qid)
+    }
+
+    // FAKE ID / PROFILE GEN
+    if (cmd === `${PREFIX}fakeid` || cmd === `${PREFIX}fakeprofile`) {
+        await api.sendTyping(chatId, 2)
+        const fake = await utils.askAI('Generate a realistic fake person profile with: Name, Age, Country, City, Job, Hobby, Fun fact. Format nicely with emojis. Make it creative and funny.')
+        return api.sendText(chatId, `╭─❏ 🪪 ꜰᴀᴋᴇ ᴘʀᴏꜰɪʟᴇ ❏\n │\n${fake}\n ╰─────────────────`, qid)
+    }
+
+    // ANNOUNCE MODE (only admins can send)
+    if (cmd === `${PREFIX}announce` && isGroup && isPrivileged) {
+        state.announce[chatId] = args[1] === 'on'
+        return api.sendText(chatId, `📢 Announce mode: *${state.announce[chatId] ? 'ON ✅ (Only admins can send)' : 'OFF ❌'}*`, qid)
+    }
+
+    // CLEAR CHAT WARNINGS
+    if (cmd === `${PREFIX}clearwarnings` && isPrivileged && isGroup) {
+        const target = extractTarget(args[1], quotedParticipant)
+        if (!target) return api.sendText(chatId, `❌ Usage: .clearwarnings <number>`, qid)
+        const key = `${chatId}_${target}`
+        state.warnings[key] = 0
+        return api.sendText(chatId, `✅ Warnings cleared for @${target}`, qid)
+    }
+
+    // CHECK WARNINGS
+    if (cmd === `${PREFIX}warnings` || cmd === `${PREFIX}checkwarn`) {
+        const target = extractTarget(args[1], quotedParticipant) || sender
+        const key    = `${chatId}_${target}`
+        const count  = (state.warnings && state.warnings[key]) || 0
+        return api.sendText(chatId,
+            `╭─❏ ⚠️ ᴡᴀʀɴɪɴɢs ❏\n │ 👤 @${target}\n │ ⚠️ *${count}/3* warnings\n │ ${count >= 3 ? '🚫 Will be kicked!' : count >= 1 ? '⚡ Be careful!' : '✅ Clean record'}\n ╰─────────────────`, qid)
+    }
+
+    // TAG ALL (enhanced)
+    if ((cmd === `${PREFIX}tagall` || cmd === `${PREFIX}everyone`) && isGroup && isPrivileged) {
+        const participants = await (async () => {
+            try { const info = await api.getGroupInfo(chatId); return info && info.participants ? info.participants : [] } catch { return [] }
+        })()
+        if (!participants.length) return api.sendText(chatId, `❌ Could not fetch participants!`, qid)
+        const chunks = []
+        let chunk = `📢 *${query || 'Attention everyone!'}*\n\n`
+        for (const p of participants) {
+            const num = (p.id || p.jid || '').split('@')[0]
+            if (!num) continue
+            chunk += `@${num} `
+            if (chunk.length > 3500) { chunks.push(chunk); chunk = '' }
+        }
+        if (chunk) chunks.push(chunk)
+        for (const c of chunks) await api.sendText(chatId, c, qid)
+        return
+    }
+
+    // HIDETAG (tag all silently)
+    if (cmd === `${PREFIX}hidetag` && isGroup && isPrivileged) {
+        const participants = await (async () => {
+            try { const info = await api.getGroupInfo(chatId); return info && info.participants ? info.participants : [] } catch { return [] }
+        })()
+        if (!participants.length) return api.sendText(chatId, `❌ Could not fetch participants!`, qid)
+        const tags = participants.map(p => `@${(p.id || p.jid || '').split('@')[0]}`).join(' ')
+        return api.sendText(chatId, query || tags, qid)
+    }
+
+    // GCINFO (enhanced)
+    if ((cmd === `${PREFIX}gcinfo` || cmd === `${PREFIX}groupinfo`) && isGroup) {
+        const info = await api.getGroupInfo(chatId)
+        if (!info) return api.sendText(chatId, `❌ Could not get group info!`, qid)
+        const total   = (info.participants || []).length
+        const admins  = (info.participants || []).filter(p => {
+            const r = (p.admin||p.rank||'').toLowerCase()
+            return p.isAdmin||p.isSuperAdmin||r==='admin'||r==='superadmin'
+        }).length
+        const members = total - admins
+        return api.sendText(chatId,
+            `╭─❏ 👥 ɢʀᴏᴜᴘ ɪɴꜰᴏ ❏\n` +
+            ` │ 📛 Name    : ${info.subject || info.name || 'Unknown'}\n` +
+            ` │ 🆔 JID     : ${chatId}\n` +
+            ` │ 👥 Members : ${total}\n` +
+            ` │ 👑 Admins  : ${admins}\n` +
+            ` │ 🙋 Regular : ${members}\n` +
+            ` │ 📅 Created : ${info.creation ? new Date(info.creation * 1000).toDateString() : 'Unknown'}\n` +
+            ` ╰─────────────────`, qid)
+    }
+
+    // ── OWNER: ADD SUDO ───────────────────────────────────────
+    // (already handled above in new block — skip duplicate)
+
+    // CARBON (code to image via carbon.now.sh)
+    if (cmd === `${PREFIX}carbon`) {
+        if (!query) return api.sendText(chatId, `❌ Usage: .carbon <code>`, qid)
+        const encoded = encodeURIComponent(query)
+        const imgUrl  = `https://carbonara.solopov.dev/api/cook?code=${encoded}&theme=dracula&language=auto`
+        return api.sendImage(chatId, imgUrl, `💻 *Code Image*`, qid)
+    }
+
+    // IP INFO
+    if (cmd === `${PREFIX}ipinfo` || cmd === `${PREFIX}ip`) {
+        const target = args[1] || ''
+        if (!target) return api.sendText(chatId, `❌ Usage: .ipinfo <ip address>`, qid)
+        await api.sendTyping(chatId, 2)
+        try {
+            const r = await require('axios').get(`https://ipapi.co/${target}/json/`, { timeout: 10_000 })
+            const d = r.data
+            if (d.error) return api.sendText(chatId, `❌ Invalid IP address!`, qid)
+            return api.sendText(chatId,
+                `╭─❏ 🌐 ɪᴘ ɪɴꜰᴏ ❏\n` +
+                ` │ 🖥️ IP      : ${d.ip}\n` +
+                ` │ 🌍 Country : ${d.country_name}\n` +
+                ` │ 🏙️ City    : ${d.city}\n` +
+                ` │ 📡 ISP     : ${d.org}\n` +
+                ` │ 🗺️ Region  : ${d.region}\n` +
+                ` │ ⏰ Timezone: ${d.timezone}\n` +
+                ` ╰─────────────────`, qid)
+        } catch { return api.sendText(chatId, `❌ Could not fetch IP info!`, qid) }
+    }
+
+    // REVERSE TEXT
+    if (cmd === `${PREFIX}reverse`) {
+        if (!query) return api.sendText(chatId, `❌ Usage: .reverse <text>`, qid)
+        return api.sendText(chatId, `🔄 ${query.split('').reverse().join('')}`, qid)
+    }
+
+    // ENCODE / DECODE BASE64
+    if (cmd === `${PREFIX}encode`) {
+        if (!query) return api.sendText(chatId, `❌ Usage: .encode <text>`, qid)
+        return api.sendText(chatId, `🔐 *Base64:*\n${Buffer.from(query).toString('base64')}`, qid)
+    }
+    if (cmd === `${PREFIX}decode`) {
+        if (!query) return api.sendText(chatId, `❌ Usage: .decode <base64>`, qid)
+        try { return api.sendText(chatId, `🔓 *Decoded:*\n${Buffer.from(query, 'base64').toString('utf8')}`, qid) }
+        catch { return api.sendText(chatId, `❌ Invalid base64!`, qid) }
+    }
+
+    // STICKER TEXT (fake sticker via text art)
+    if (cmd === `${PREFIX}sticker` || cmd === `${PREFIX}stickertext`) {
+        if (!query) return api.sendText(chatId, `❌ Usage: .sticker <text>`, qid)
+        await api.sendTyping(chatId, 1)
+        const stickerUrl = `https://api.minhazav.dev/image-text?text=${encodeURIComponent(query)}&bg=transparent&color=white&font=bold`
+        return api.sendImage(chatId, stickerUrl, `🏷️ *${query}*`, qid)
+    }
+
+    // BOT STATUS SUMMARY (owner)
+    if ((cmd === `${PREFIX}status` || cmd === `${PREFIX}botstatus`) && isOwner) {
+        const chatbotCount = Object.values(state.chatbot || {}).filter(Boolean).length
+        const sudoCount    = (state.sudoUsers || []).length
+        const xpCount      = Object.keys(state.xpData || {}).length
+        const warnCount    = Object.values(state.warnings || {}).filter(v => v > 0).length
+        return api.sendText(chatId,
+            `╭─❏ 📊 ʙᴏᴛ sᴛᴀᴛᴜs ❏\n` +
+            ` │ ⏳ Uptime    : ${utils.getUptime()}\n` +
+            ` │ 🤖 Chatbots  : ${chatbotCount} active\n` +
+            ` │ 🛡️ Sudo users: ${sudoCount}\n` +
+            ` │ ⚡ XP tracked: ${xpCount} users\n` +
+            ` │ ⚠️ Warnings  : ${warnCount} active\n` +
+            ` │ 🔐 Mode      : ${state.selfMode ? 'Self 🔒' : 'Public 🔓'}\n` +
+            ` ╰─────────────────`, qid)
+    }
+
 }
 
 module.exports = { handleCommand }
