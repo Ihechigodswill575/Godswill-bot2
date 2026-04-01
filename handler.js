@@ -99,30 +99,32 @@ async function handleMessage(msg) {
         const isPrivileged = isOwner || isSudo
 
         // ── Check if sender is a WhatsApp group admin ─────────
-        // Evolution API includes participant admin status in the message payload itself
-        // so we don't need a separate API call that causes 400 errors
+        // Evolution API does NOT support findGroupInfos reliably, so we
+        // read admin status directly from the webhook payload Evolution sends us.
+        // Evolution API injects groupMetadata into the message object.
         let isGroupAdmin = false
         if (isGroup) {
-            // Method 1: check groupMetadata in the message (Evolution API v2 includes this)
-            const participants = msg?.groupMetadata?.participants || msg?.participant_list || []
+            const participants =
+                msg?.groupMetadata?.participants ||
+                msg?.message?.groupMetadata?.participants ||
+                msg?.data?.groupMetadata?.participants ||
+                []
+
             if (participants.length > 0) {
                 isGroupAdmin = participants.some(p => {
                     const num = cleanNumber(p.id || p.jid || '')
-                    return num === senderNumber && (p.isAdmin || p.isSuperAdmin || p.rank === 'admin' || p.admin === 'admin' || p.admin === 'superadmin')
+                    const admin = p.admin || p.rank || ''
+                    return num === senderNumber && (
+                        p.isAdmin === true ||
+                        p.isSuperAdmin === true ||
+                        admin === 'admin' ||
+                        admin === 'superadmin'
+                    )
                 })
-            }
-
-            // Method 2: fallback — try getGroupInfo but don't block if it fails
-            if (!isGroupAdmin) {
-                try {
-                    const groupInfo = await api.getGroupInfo(chatId)
-                    if (groupInfo?.participants?.length > 0) {
-                        isGroupAdmin = groupInfo.participants.some(p => {
-                            const num = cleanNumber(p.id || '')
-                            return num === senderNumber && (p.rank === 'admin' || p.admin === 'admin' || p.admin === 'superadmin')
-                        })
-                    }
-                } catch {}
+                console.log(`[ADMIN CHECK] Found ${participants.length} participants in payload, isGroupAdmin=${isGroupAdmin}`)
+            } else {
+                // No participants in payload — log the raw msg keys so we can debug
+                console.log(`[ADMIN CHECK] No participants in payload. msg keys: ${Object.keys(msg || {}).join(', ')}`)
             }
 
             console.log(`[MSG] ${senderNumber} | Owner:${isOwner} | Sudo:${isSudo} | GroupAdmin:${isGroupAdmin} | Group:${isGroup} | "${text.slice(0,60)}"`)
