@@ -1,6 +1,8 @@
-
 'use strict'
 
+// OWNER_NUMBER in Railway env should be: 2341245688688
+// (your personal number that controls the bot)
+// The bot's own number (2347074130463) is the Evolution API instance number — NOT the owner
 const rawOwners = process.env.OWNER_NUMBERS || process.env.OWNER_NUMBER || '2348145688688'
 const OWNER_NUMBERS = rawOwners.split(',').map(n => n.replace(/[^0-9]/g, '').replace(/^0+/, ''))
 
@@ -18,7 +20,7 @@ module.exports = {
     PREFIX    : '.',
     BAD_WORDS : ['fuck', 'shit', 'bitch', 'bastard', 'idiot', 'stupid'],
 
-    // Rate limit: max messages per window
-    CHATBOT_RATE_LIMIT     : 20,      // max messages
-    CHATBOT_RATE_WINDOW_MS : 30_000,  // per 30 seconds
+    // Chatbot rate limit
+    CHATBOT_RATE_LIMIT     : 20,
+    CHATBOT_RATE_WINDOW_MS : 30_000,
 }
