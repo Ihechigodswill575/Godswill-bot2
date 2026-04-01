@@ -90,7 +90,23 @@ async function sendTyping(chatId, seconds = 2) {
 }
 
 async function getGroupInfo(groupId) {
-    return request('get', `/group/findGroupInfos/${EVO_INSTANCE}?groupJid=${groupId}`)
+    // Evolution API v2: groupJid must be passed as query param without the @g.us suffix sometimes
+    // Try multiple formats until one works
+    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`
+
+    // Format 1: standard query param
+    let res = await request('get', `/group/findGroupInfos/${EVO_INSTANCE}?groupJid=${encodeURIComponent(jid)}`)
+    if (res) return res
+
+    // Format 2: without encoding
+    res = await request('get', `/group/findGroupInfos/${EVO_INSTANCE}?groupJid=${jid}`)
+    if (res) return res
+
+    // Format 3: as POST body (some Evolution API versions)
+    res = await request('post', `/group/findGroupInfos/${EVO_INSTANCE}`, { groupJid: jid })
+    if (res) return res
+
+    return null
 }
 
 async function addGroupParticipants(groupId, participants) {
