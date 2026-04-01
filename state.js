@@ -8,7 +8,8 @@ module.exports = {
     antilink    : {},
     antispam    : {},
     spamCount   : {},
-    chatbot     : {},
+    chatbot     : {},    // { [chatId]: true/false } — works in DMs and GCs
+    chatbotRate : {},    // { [chatId]: { count, windowStart } } — rate limiting
     warnings    : {},
     autoread    : false,
     autoreact   : false,
