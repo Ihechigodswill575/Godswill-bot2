@@ -1,10 +1,19 @@
 'use strict'
 
-// OWNER_NUMBER in Railway env should be: 2341245688688
-// (your personal number that controls the bot)
-// The bot's own number (2347074130463) is the Evolution API instance number — NOT the owner
-const rawOwners = process.env.OWNER_NUMBERS || process.env.OWNER_NUMBER || '2348145688688'
-const OWNER_NUMBERS = rawOwners.split(',').map(n => n.replace(/[^0-9]/g, '').replace(/^0+/, ''))
+// ══════════════════════════════════════════════════════════════
+//  OWNER CONFIG
+//  OWNER_NUMBERS = comma-separated list of owner phone numbers
+//  These numbers have FULL control over the bot
+//
+//  Owner 1: 2348145688688  (main owner - GODSWILL)
+//  Owner 2: 2348164476365  (second owner)
+//
+//  BOT number = The Evolution API instance number (+234 707 413 0463)
+//  → This is NOT an owner. NEVER put the bot number here.
+// ══════════════════════════════════════════════════════════════
+
+const rawOwners = process.env.OWNER_NUMBERS || process.env.OWNER_NUMBER || '2348145688688,2348164476365'
+const OWNER_NUMBERS = rawOwners.split(',').map(n => n.replace(/[^0-9]/g, '').replace(/^0+/, '')).filter(Boolean)
 
 module.exports = {
     BOT_NAME      : process.env.BOT_NAME   || 'TAVIK BOT',
@@ -20,7 +29,7 @@ module.exports = {
     PREFIX    : '.',
     BAD_WORDS : ['fuck', 'shit', 'bitch', 'bastard', 'idiot', 'stupid'],
 
-    // Chatbot rate limit
-    CHATBOT_RATE_LIMIT     : 20,
-    CHATBOT_RATE_WINDOW_MS : 30_000,
+    // Chatbot rate limit — set high so Groq is never blocked
+    CHATBOT_RATE_LIMIT     : 100,
+    CHATBOT_RATE_WINDOW_MS : 60_000,
 }
