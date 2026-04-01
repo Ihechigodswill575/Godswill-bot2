@@ -27,10 +27,90 @@ async function request(method, endpoint, data = null) {
     }
 }
 
-// ── Format number for Evolution API ──────────────────────────
 function formatNumber(chatId) {
     if (chatId.includes('@')) return chatId
     return chatId
+}
+
+// ── Normalize a participant object to extract real phone number ──
+// Evolution API v2 sometimes returns @lid IDs.
+// Real number is found in: p.phone, p.phones[0], or p.id if @s.whatsapp.net
+function participantToNumber(p) {
+    if (!p) return ''
+    // Best: explicit phone field
+    if (p.phone) return String(p.phone).replace(/[^0-9]/g, '')
+    if (p.phones && p.phones[0]) return String(p.phones[0]).replace(/[^0-9]/g, '')
+    // p.id might be @s.whatsapp.net (real) or @lid (fake)
+    const id = p.id || p.jid || ''
+    if (id.includes('@s.whatsapp.net')) {
+        return id.replace('@s.whatsapp.net', '').replace(/[^0-9]/g, '')
+    }
+    if (id.includes('@lid')) {
+        // @lid is a numeric alias — NOT a phone number, skip it
+        // Try other fields
+        if (p.notify) return ''   // display name, not a number
+        return ''                 // can't resolve — caller must skip this participant
+    }
+    // plain number
+    return id.replace(/[^0-9]/g, '')
+}
+
+// ── Get group info with 4 fallback strategies ─────────────────
+async function getGroupInfo(groupId) {
+    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`
+
+    // Strategy 1: standard GET
+    try {
+        const res = await client({ method: 'get', url: `/group/participants/${EVO_INSTANCE}`, params: { groupJid: jid } })
+        if (res.data?.participants?.length) {
+            console.log(`[API] getGroupInfo S1 OK`)
+            return normalizeGroupInfo(res.data)
+        }
+    } catch (e) { console.log(`[API] S1 failed: ${e.response?.status}`) }
+
+    // Strategy 2: fetchAllGroups
+    try {
+        const res = await client({ method: 'get', url: `/group/fetchAllGroups/${EVO_INSTANCE}`, params: { getParticipants: 'true' } })
+        const groups = Array.isArray(res.data) ? res.data : (res.data?.groups || [])
+        const found  = groups.find(g => g.id === jid || g.groupJid === jid)
+        if (found?.participants?.length) {
+            console.log(`[API] getGroupInfo S2 OK`)
+            return normalizeGroupInfo(found)
+        }
+    } catch (e) { console.log(`[API] S2 failed: ${e.response?.status}`) }
+
+    // Strategy 3: POST body
+    try {
+        const res = await client({ method: 'post', url: `/group/participants/${EVO_INSTANCE}`, data: { groupJid: jid } })
+        if (res.data?.participants?.length) {
+            console.log(`[API] getGroupInfo S3 OK`)
+            return normalizeGroupInfo(res.data)
+        }
+    } catch (e) { console.log(`[API] S3 failed: ${e.response?.status}`) }
+
+    // Strategy 4: findGroupInfos
+    try {
+        const res = await client({ method: 'get', url: `/group/findGroupInfos/${EVO_INSTANCE}`, params: { groupJid: jid } })
+        if (res.data?.participants?.length) {
+            console.log(`[API] getGroupInfo S4 OK`)
+            return normalizeGroupInfo(res.data)
+        }
+    } catch (e) { console.log(`[API] S4 failed: ${e.response?.status}`) }
+
+    console.log(`[API] getGroupInfo ALL failed for ${jid}`)
+    return null
+}
+
+// Normalize group info so participants always have a .realNumber field
+function normalizeGroupInfo(info) {
+    if (!info || !info.participants) return info
+    info.participants = info.participants.map(p => {
+        const realNumber = participantToNumber(p)
+        return { ...p, realNumber }
+    // Filter out @lid participants with no resolvable number ONLY for tagall purposes
+    // We keep them in the array but mark them
+    })
+    return info
 }
 
 async function sendText(chatId, text, quotedId = null) {
@@ -88,84 +168,6 @@ async function sendTyping(chatId, seconds = 2) {
     })
 }
 
-// ── Get group info — tries multiple Evolution API endpoints ───
-// Evolution API v1 vs v2 differ in endpoint paths.
-// The @lid bug means some versions return 400 for the participants endpoint.
-// We try 4 strategies in order:
-//   1. GET /group/participants/{instance}?groupJid=xxx  (v2 standard)
-//   2. GET /group/fetchAllGroups/{instance}?getParticipants=true  (v2 alt)
-//   3. POST /group/participants/{instance} with body { groupJid }  (v1 style)
-//   4. GET /group/findGroupInfos/{instance}?groupJid=xxx  (some forks)
-async function getGroupInfo(groupId) {
-    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`
-
-    // Strategy 1: standard v2 GET with query param
-    try {
-        const res = await client({
-            method : 'get',
-            url    : `/group/participants/${EVO_INSTANCE}`,
-            params : { groupJid: jid },
-        })
-        if (res.data?.participants?.length) {
-            console.log(`[API] getGroupInfo strategy1 OK for ${jid}`)
-            return res.data
-        }
-    } catch (e) {
-        console.log(`[API] getGroupInfo strategy1 failed: ${e.response?.status} ${e.message}`)
-    }
-
-    // Strategy 2: fetchAllGroups then filter
-    try {
-        const res = await client({
-            method : 'get',
-            url    : `/group/fetchAllGroups/${EVO_INSTANCE}`,
-            params : { getParticipants: 'true' },
-        })
-        const groups = Array.isArray(res.data) ? res.data : (res.data?.groups || [])
-        const found  = groups.find(g => g.id === jid || g.groupJid === jid || g.subject?.id === jid)
-        if (found?.participants?.length) {
-            console.log(`[API] getGroupInfo strategy2 OK for ${jid}`)
-            return found
-        }
-    } catch (e) {
-        console.log(`[API] getGroupInfo strategy2 failed: ${e.response?.status} ${e.message}`)
-    }
-
-    // Strategy 3: POST body (v1 style)
-    try {
-        const res = await client({
-            method : 'post',
-            url    : `/group/participants/${EVO_INSTANCE}`,
-            data   : { groupJid: jid },
-        })
-        if (res.data?.participants?.length) {
-            console.log(`[API] getGroupInfo strategy3 OK for ${jid}`)
-            return res.data
-        }
-    } catch (e) {
-        console.log(`[API] getGroupInfo strategy3 failed: ${e.response?.status} ${e.message}`)
-    }
-
-    // Strategy 4: findGroupInfos
-    try {
-        const res = await client({
-            method : 'get',
-            url    : `/group/findGroupInfos/${EVO_INSTANCE}`,
-            params : { groupJid: jid },
-        })
-        const d = res.data
-        if (d?.participants?.length) {
-            console.log(`[API] getGroupInfo strategy4 OK for ${jid}`)
-            return d
-        }
-    } catch (e) {
-        console.log(`[API] getGroupInfo strategy4 failed: ${e.response?.status} ${e.message}`)
-    }
-
-    console.log(`[API] getGroupInfo ALL strategies failed for ${jid}`)
-    return null
-}
-
 async function addGroupParticipants(groupId, participants) {
     return request('post', `/group/updateParticipant/${EVO_INSTANCE}`, {
         groupJid: groupId, action: 'add', participants
@@ -209,21 +211,11 @@ async function updateBlockStatus(number, action) {
 
 module.exports = {
     request,
-    sendText,
-    sendImage,
-    sendVideo,
-    sendAudio,
-    sendDocument,
-    sendReaction,
-    deleteMessage,
-    markRead,
-    sendTyping,
+    participantToNumber,
+    sendText, sendImage, sendVideo, sendAudio, sendDocument,
+    sendReaction, deleteMessage, markRead, sendTyping,
     getGroupInfo,
-    addGroupParticipants,
-    removeGroupParticipants,
-    promoteGroupParticipants,
-    demoteGroupParticipants,
-    checkHealth,
-    setWebhook,
-    updateBlockStatus,
+    addGroupParticipants, removeGroupParticipants,
+    promoteGroupParticipants, demoteGroupParticipants,
+    checkHealth, setWebhook, updateBlockStatus,
 }
