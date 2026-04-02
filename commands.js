@@ -129,7 +129,7 @@ function buildMenu(chatId) {
  │ hijack  banuser
  ╰─────────────────
 
-_💡 Say *tavik* to wake me!_`
+_💡 Say *richard* to wake me!_`
 }
 
 async function handleCommand(chatId, sender, text, qid, isOwner, isSudo, isGroup, msg, isGroupAdmin = false) {
