@@ -8,10 +8,7 @@ const EVO_INSTANCE = process.env.EVO_INSTANCE || 'tavik-bot'
 
 const client = axios.create({
     baseURL : EVO_URL,
-    headers : {
-        'apikey'       : EVO_KEY,
-        'Content-Type' : 'application/json',
-    },
+    headers : { 'apikey': EVO_KEY, 'Content-Type': 'application/json' },
     timeout : 30_000,
 })
 
@@ -27,90 +24,113 @@ async function request(method, endpoint, data = null) {
     }
 }
 
-function formatNumber(chatId) {
-    if (chatId.includes('@')) return chatId
-    return chatId
-}
+function formatNumber(n) { return n.includes('@') ? n : n }
 
-// ── Normalize a participant object to extract real phone number ──
-// Evolution API v2 sometimes returns @lid IDs.
-// Real number is found in: p.phone, p.phones[0], or p.id if @s.whatsapp.net
+// ── Normalize participant — resolve @lid to real number ───────
 function participantToNumber(p) {
     if (!p) return ''
-    // Best: explicit phone field
     if (p.phone) return String(p.phone).replace(/[^0-9]/g, '')
-    if (p.phones && p.phones[0]) return String(p.phones[0]).replace(/[^0-9]/g, '')
-    // p.id might be @s.whatsapp.net (real) or @lid (fake)
+    if (p.phones?.[0]) return String(p.phones[0]).replace(/[^0-9]/g, '')
     const id = p.id || p.jid || ''
-    if (id.includes('@s.whatsapp.net')) {
-        return id.replace('@s.whatsapp.net', '').replace(/[^0-9]/g, '')
-    }
-    if (id.includes('@lid')) {
-        // @lid is a numeric alias — NOT a phone number, skip it
-        // Try other fields
-        if (p.notify) return ''   // display name, not a number
-        return ''                 // can't resolve — caller must skip this participant
-    }
-    // plain number
+    if (id.includes('@s.whatsapp.net')) return id.split('@')[0].replace(/[^0-9]/g, '')
+    if (id.includes('@lid')) return '' // @lid = unresolvable alias, skip
     return id.replace(/[^0-9]/g, '')
 }
 
-// ── Get group info with 4 fallback strategies ─────────────────
+function normalizeParticipants(participants) {
+    return (participants || []).map(p => ({ ...p, realNumber: participantToNumber(p) }))
+}
+
+// ── Get group participants — tries every known endpoint ───────
 async function getGroupInfo(groupId) {
     const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`
 
-    // Strategy 1: standard GET
+    // S1: v2 GET with query param (standard)
     try {
-        const res = await client({ method: 'get', url: `/group/participants/${EVO_INSTANCE}`, params: { groupJid: jid } })
+        const res = await client.get(`/group/participants/${EVO_INSTANCE}`, { params: { groupJid: jid } })
         if (res.data?.participants?.length) {
-            console.log(`[API] getGroupInfo S1 OK`)
-            return normalizeGroupInfo(res.data)
+            res.data.participants = normalizeParticipants(res.data.participants)
+            console.log('[API] getGroupInfo S1 OK')
+            return res.data
         }
-    } catch (e) { console.log(`[API] S1 failed: ${e.response?.status}`) }
+    } catch (e) { console.log('[API] S1:', e.response?.status, e.message) }
 
-    // Strategy 2: fetchAllGroups
+    // S2: fetchAllGroups
     try {
-        const res = await client({ method: 'get', url: `/group/fetchAllGroups/${EVO_INSTANCE}`, params: { getParticipants: 'true' } })
+        const res = await client.get(`/group/fetchAllGroups/${EVO_INSTANCE}`, { params: { getParticipants: 'true' } })
         const groups = Array.isArray(res.data) ? res.data : (res.data?.groups || [])
-        const found  = groups.find(g => g.id === jid || g.groupJid === jid)
+        const found  = groups.find(g => g.id === jid || g.groupJid === jid || g.subject?.id === jid)
         if (found?.participants?.length) {
-            console.log(`[API] getGroupInfo S2 OK`)
-            return normalizeGroupInfo(found)
+            found.participants = normalizeParticipants(found.participants)
+            console.log('[API] getGroupInfo S2 OK')
+            return found
         }
-    } catch (e) { console.log(`[API] S2 failed: ${e.response?.status}`) }
+    } catch (e) { console.log('[API] S2:', e.response?.status, e.message) }
 
-    // Strategy 3: POST body
+    // S3: POST body
     try {
-        const res = await client({ method: 'post', url: `/group/participants/${EVO_INSTANCE}`, data: { groupJid: jid } })
+        const res = await client.post(`/group/participants/${EVO_INSTANCE}`, { groupJid: jid })
         if (res.data?.participants?.length) {
-            console.log(`[API] getGroupInfo S3 OK`)
-            return normalizeGroupInfo(res.data)
+            res.data.participants = normalizeParticipants(res.data.participants)
+            console.log('[API] getGroupInfo S3 OK')
+            return res.data
         }
-    } catch (e) { console.log(`[API] S3 failed: ${e.response?.status}`) }
+    } catch (e) { console.log('[API] S3:', e.response?.status, e.message) }
 
-    // Strategy 4: findGroupInfos
+    // S4: findGroupInfos
     try {
-        const res = await client({ method: 'get', url: `/group/findGroupInfos/${EVO_INSTANCE}`, params: { groupJid: jid } })
+        const res = await client.get(`/group/findGroupInfos/${EVO_INSTANCE}`, { params: { groupJid: jid } })
         if (res.data?.participants?.length) {
-            console.log(`[API] getGroupInfo S4 OK`)
-            return normalizeGroupInfo(res.data)
+            res.data.participants = normalizeParticipants(res.data.participants)
+            console.log('[API] getGroupInfo S4 OK')
+            return res.data
         }
-    } catch (e) { console.log(`[API] S4 failed: ${e.response?.status}`) }
+    } catch (e) { console.log('[API] S4:', e.response?.status, e.message) }
 
-    console.log(`[API] getGroupInfo ALL failed for ${jid}`)
+    // S5: findGroupByJid
+    try {
+        const res = await client.get(`/group/findGroupByJid/${EVO_INSTANCE}`, { params: { groupJid: jid } })
+        if (res.data?.participants?.length) {
+            res.data.participants = normalizeParticipants(res.data.participants)
+            console.log('[API] getGroupInfo S5 OK')
+            return res.data
+        }
+    } catch (e) { console.log('[API] S5:', e.response?.status, e.message) }
+
+    console.log('[API] getGroupInfo ALL strategies failed for', jid)
     return null
 }
 
-// Normalize group info so participants always have a .realNumber field
-function normalizeGroupInfo(info) {
-    if (!info || !info.participants) return info
-    info.participants = info.participants.map(p => {
-        const realNumber = participantToNumber(p)
-        return { ...p, realNumber }
-    // Filter out @lid participants with no resolvable number ONLY for tagall purposes
-    // We keep them in the array but mark them
-    })
-    return info
+// ── Get invite link — dedicated endpoint ──────────────────────
+async function getGroupInviteCode(groupId) {
+    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`
+    // Try v2 endpoint
+    try {
+        const res = await client.get(`/group/inviteCode/${EVO_INSTANCE}`, { params: { groupJid: jid } })
+        return res.data?.inviteCode || res.data?.code || res.data?.invite || null
+    } catch {}
+    // Try inside group info
+    try {
+        const info = await getGroupInfo(jid)
+        return info?.inviteCode || info?.invite || info?.code || null
+    } catch {}
+    return null
+}
+
+// ── Update group info (name/description) ─────────────────────
+async function updateGroupInfo(groupId, data) {
+    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`
+    // Try v2
+    try {
+        const res = await client.put(`/group/updateGroupInfo/${EVO_INSTANCE}`, { groupJid: jid, ...data })
+        return res.data
+    } catch {}
+    // Try patch
+    try {
+        const res = await client.patch(`/group/updateGroupInfo/${EVO_INSTANCE}`, { groupJid: jid, ...data })
+        return res.data
+    } catch {}
+    return null
 }
 
 async function sendText(chatId, text, quotedId = null) {
@@ -118,91 +138,70 @@ async function sendText(chatId, text, quotedId = null) {
     if (quotedId) body.quoted = { key: { id: quotedId } }
     return request('post', `/message/sendText/${EVO_INSTANCE}`, body)
 }
-
 async function sendImage(chatId, url, caption = '', quotedId = null) {
     const body = { number: formatNumber(chatId), mediatype: 'image', media: url, caption }
     if (quotedId) body.quoted = { key: { id: quotedId } }
     return request('post', `/message/sendMedia/${EVO_INSTANCE}`, body)
 }
-
 async function sendVideo(chatId, url, caption = '', quotedId = null) {
     const body = { number: formatNumber(chatId), mediatype: 'video', media: url, caption }
     if (quotedId) body.quoted = { key: { id: quotedId } }
     return request('post', `/message/sendMedia/${EVO_INSTANCE}`, body)
 }
-
 async function sendAudio(chatId, url) {
     return request('post', `/message/sendMedia/${EVO_INSTANCE}`, {
         number: formatNumber(chatId), mediatype: 'audio', media: url
     })
 }
-
 async function sendDocument(chatId, url, filename = 'file') {
     return request('post', `/message/sendMedia/${EVO_INSTANCE}`, {
         number: formatNumber(chatId), mediatype: 'document', media: url, fileName: filename
     })
 }
-
+async function sendSticker(chatId, url, quotedId = null) {
+    const body = { number: formatNumber(chatId), mediatype: 'sticker', media: url }
+    if (quotedId) body.quoted = { key: { id: quotedId } }
+    return request('post', `/message/sendMedia/${EVO_INSTANCE}`, body)
+}
 async function sendReaction(chatId, messageId, emoji) {
     return request('post', `/message/sendReaction/${EVO_INSTANCE}`, {
         key: { remoteJid: chatId, id: messageId }, reaction: emoji
     })
 }
-
 async function deleteMessage(chatId, messageId) {
     return request('delete', `/chat/deleteMessage/${EVO_INSTANCE}`, {
         id: messageId, remoteJid: chatId, fromMe: false
     })
 }
-
 async function markRead(chatId) {
     return request('post', `/chat/markMessageAsRead/${EVO_INSTANCE}`, {
         readMessages: [{ remoteJid: chatId, fromMe: false, id: 'all' }]
     })
 }
-
 async function sendTyping(chatId, seconds = 2) {
     return request('post', `/chat/sendPresence/${EVO_INSTANCE}`, {
         number: formatNumber(chatId),
         options: { presence: 'composing', delay: seconds * 1000 }
     })
 }
-
 async function addGroupParticipants(groupId, participants) {
-    return request('post', `/group/updateParticipant/${EVO_INSTANCE}`, {
-        groupJid: groupId, action: 'add', participants
-    })
+    return request('post', `/group/updateParticipant/${EVO_INSTANCE}`, { groupJid: groupId, action: 'add', participants })
 }
-
 async function removeGroupParticipants(groupId, participants) {
-    return request('post', `/group/updateParticipant/${EVO_INSTANCE}`, {
-        groupJid: groupId, action: 'remove', participants
-    })
+    return request('post', `/group/updateParticipant/${EVO_INSTANCE}`, { groupJid: groupId, action: 'remove', participants })
 }
-
 async function promoteGroupParticipants(groupId, participants) {
-    return request('post', `/group/updateParticipant/${EVO_INSTANCE}`, {
-        groupJid: groupId, action: 'promote', participants
-    })
+    return request('post', `/group/updateParticipant/${EVO_INSTANCE}`, { groupJid: groupId, action: 'promote', participants })
 }
-
 async function demoteGroupParticipants(groupId, participants) {
-    return request('post', `/group/updateParticipant/${EVO_INSTANCE}`, {
-        groupJid: groupId, action: 'demote', participants
-    })
+    return request('post', `/group/updateParticipant/${EVO_INSTANCE}`, { groupJid: groupId, action: 'demote', participants })
 }
-
-async function checkHealth() {
-    return request('get', `/instance/connectionState/${EVO_INSTANCE}`)
-}
-
+async function checkHealth() { return request('get', `/instance/connectionState/${EVO_INSTANCE}`) }
 async function setWebhook(url) {
     return request('post', `/webhook/set/${EVO_INSTANCE}`, {
-        url, enabled: true,
-        events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'SEND_MESSAGE']
+        url, enabled: true, events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'SEND_MESSAGE']
     })
 }
-
 async function updateBlockStatus(number, action) {
     return request('post', `/chat/updateBlockStatus/${EVO_INSTANCE}`, {
         number: formatNumber(number), status: action
@@ -210,11 +209,10 @@ async function updateBlockStatus(number, action) {
 }
 
 module.exports = {
-    request,
-    participantToNumber,
-    sendText, sendImage, sendVideo, sendAudio, sendDocument,
+    request, participantToNumber,
+    sendText, sendImage, sendVideo, sendAudio, sendDocument, sendSticker,
     sendReaction, deleteMessage, markRead, sendTyping,
-    getGroupInfo,
+    getGroupInfo, getGroupInviteCode, updateGroupInfo,
     addGroupParticipants, removeGroupParticipants,
     promoteGroupParticipants, demoteGroupParticipants,
     checkHealth, setWebhook, updateBlockStatus,
