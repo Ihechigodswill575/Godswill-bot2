@@ -220,8 +220,8 @@ async function handleMessage(msg) {
         // ── Name trigger ──────────────────────────────────────
         const lower = text.toLowerCase().trim()
         if (!text.startsWith(PREFIX) && (
-            lower === 'tavik' || lower.startsWith('tavik ') ||
-            lower.includes(' tavik ') || lower.endsWith(' tavik') || lower.includes('@tavik')
+            lower === 'richard' || lower.startsWith('richard ') ||
+            lower.includes(' richard ') || lower.endsWith(' richard') || lower.includes('@richard')
         )) {
             const responses = [
                 `👀 You called? I'm *${BOT_NAME}*!\nType *${PREFIX}menu* to see what I can do 🔥`,
