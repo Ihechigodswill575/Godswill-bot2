@@ -16,7 +16,7 @@ const rawOwners = process.env.OWNER_NUMBERS || process.env.OWNER_NUMBER || '2348
 const OWNER_NUMBERS = rawOwners.split(',').map(n => n.replace(/[^0-9]/g, '').replace(/^0+/, '')).filter(Boolean)
 
 module.exports = {
-    BOT_NAME      : process.env.BOT_NAME   || 'TAVIK BOT',
+    BOT_NAME      : process.env.BOT_NAME   || 'RICHARD BOT',
     BOT_VERSION   : 'V3.0',
     OWNER_NAME    : process.env.OWNER_NAME || 'TAVIK',
     OWNER_NUMBER  : OWNER_NUMBERS[0],
