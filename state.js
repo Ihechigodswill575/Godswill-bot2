@@ -1,5 +1,4 @@
 'use strict'
-
 module.exports = {
     sudoUsers    : [],
     antiDelete   : {},
@@ -7,19 +6,25 @@ module.exports = {
     antibadword  : {},
     antilink     : {},
     antispam     : {},
+    antifake     : {},   // antifake numbers (non-real numbers)
     spamCount    : {},
-    chatbot      : {},    // { [chatId]: true/false }
-    chatbotRate  : {},    // { [chatId]: { count, windowStart } }
+    chatbot      : {},
+    chatbotRate  : {},
     warnings     : {},
     autoread     : false,
     autoreact    : false,
     autotyping   : false,
     selfMode     : false,
     floodActive  : {},
-    antiGhostPing: {},    // { [chatId]: true/false }
-    welcome      : {},    // { [chatId]: { enabled, msg, byeMsg } }
-    announce     : {},    // { [chatId]: true/false } — only admins can send
-    trivia       : {},    // { [chatId]: { question, answer, active } }
-    xpData       : {},    // { [number]: { xp, level, name } }
-    polls        : {},    // { [chatId]: { question, options, votes } }
+    antiGhostPing: {},
+    welcome      : {},   // { [chatId]: { enabled, msg, byeMsg } }
+    announce     : {},   // mute — only admins send
+    trivia       : {},
+    xpData       : {},
+    polls        : {},
+    afkUsers     : {},   // { [number]: { reason, time } }
+    filters      : {},   // { [chatId]: { [keyword]: response } }
+    reminders    : [],   // [{ number, text, time }]
+    greetings    : {},   // { [number]: customGreeting }
+    msgCount     : {},   // { [chatId]: { [number]: count } }
 }
