@@ -95,6 +95,18 @@ async function handleMessage(msg) {
             senderJid = candidates.find(c => c.includes('@s.whatsapp.net'))
                      || candidates.find(c => !c.includes('@lid'))
                      || candidates[0] || ''
+
+            // ── LID fallback: try to resolve @lid to a known owner number ──
+            if (senderJid.includes('@lid')) {
+                const lidNum = cleanNumber(senderJid)
+                const ownerMatch = OWNER_NUMBERS.find(o => {
+                    const oClean = cleanNumber(o)
+                    return lidNum === oClean
+                        || (lidNum.length >= 7 && oClean.endsWith(lidNum.slice(-7)))
+                        || (oClean.length >= 7 && lidNum.endsWith(oClean.slice(-7)))
+                })
+                if (ownerMatch) senderJid = `${cleanNumber(ownerMatch)}@s.whatsapp.net`
+            }
         } else {
             senderJid = msg.sender || chatId
         }
@@ -108,6 +120,7 @@ async function handleMessage(msg) {
         const msgKeyId     = msg.key?.id || null
         const isOwner      = checkIsOwner(senderNumber)
         const isSudo       = state.sudoUsers.includes(senderNumber)
+        // Owners bypass all privilege checks — no need to be group admin
         const isPrivileged = isOwner || isSudo
 
         // ── Group admin check — skip entirely for owner ────────
